@@ -1,0 +1,404 @@
+{
+  "questions": [
+    {
+      "id": "dp_001",
+      "concept": "dp",
+      "difficulty": 1,
+      "question": "Which technique avoids recomputing overlapping subproblems?",
+      "options": ["A) Greedy", "B) Memoization", "C) Binary search", "D) Two pointers"],
+      "answer": "B"
+    },
+    {
+      "id": "dp_002",
+      "concept": "dp",
+      "difficulty": 1,
+      "question": "What does 'optimal substructure' mean in dynamic programming?",
+      "options": ["A) The problem has a unique solution", "B) The optimal solution contains optimal solutions to subproblems", "C) The problem is solved in O(n) time", "D) Each subproblem is solved independently"],
+      "answer": "B"
+    },
+    {
+      "id": "dp_003",
+      "concept": "dp",
+      "difficulty": 1,
+      "question": "Which approach fills a table from smaller subproblems to larger ones?",
+      "options": ["A) Top-down with memoization", "B) Greedy", "C) Bottom-up tabulation", "D) Divide and conquer"],
+      "answer": "C"
+    },
+    {
+      "id": "dp_004",
+      "concept": "dp",
+      "difficulty": 2,
+      "question": "When computing the nth Fibonacci number using DP, what is the time complexity?",
+      "options": ["A) O(2^n)", "B) O(n log n)", "C) O(n)", "D) O(log n)"],
+      "answer": "C"
+    },
+    {
+      "id": "dp_005",
+      "concept": "dp",
+      "difficulty": 2,
+      "question": "In the 0/1 knapsack problem, why can't we use a greedy approach?",
+      "options": ["A) Items can be fractional", "B) We cannot always make the locally optimal choice and reach the global optimum", "C) The time complexity would be too high", "D) Greedy works fine for 0/1 knapsack"],
+      "answer": "B"
+    },
+    {
+      "id": "dp_006",
+      "concept": "dp",
+      "difficulty": 2,
+      "question": "What is the space complexity of the classic bottom-up Fibonacci DP solution?",
+      "options": ["A) O(n)", "B) O(n^2)", "C) O(1) with optimized approach", "D) O(log n)"],
+      "answer": "C"
+    },
+    {
+      "id": "dp_007",
+      "concept": "dp",
+      "difficulty": 3,
+      "question": "Why does the longest common subsequence problem have O(mn) complexity?",
+      "options": ["A) We try all permutations of both strings", "B) Each cell depends on three surrounding cells requiring a 2D table of size m×n", "C) We perform binary search at each character", "D) The recurrence requires factorial computation"],
+      "answer": "B"
+    },
+    {
+      "id": "dp_008",
+      "concept": "dp",
+      "difficulty": 3,
+      "question": "When would you prefer top-down memoization over bottom-up tabulation?",
+      "options": ["A) Always — memoization is faster", "B) When only a small fraction of subproblems need to be solved", "C) When the table size is small", "D) When the recurrence is linear"],
+      "answer": "B"
+    },
+    {
+      "id": "dp_009",
+      "concept": "dp",
+      "difficulty": 3,
+      "question": "Which DP technique reconstructs the actual solution path, not just the optimal value?",
+      "options": ["A) Memoization cache lookup", "B) Backtracking through the DP table using stored choices", "C) Running the recurrence in reverse", "D) Greedy path selection from the DP table"],
+      "answer": "B"
+    },
+    {
+      "id": "dp_010",
+      "concept": "dp",
+      "difficulty": 2,
+      "question": "The edit distance (Levenshtein) DP uses which recurrence for matching characters?",
+      "options": ["A) dp[i][j] = dp[i-1][j-1] + 1", "B) dp[i][j] = dp[i-1][j-1] (no cost when characters match)", "C) dp[i][j] = min(dp[i-1][j], dp[i][j-1])", "D) dp[i][j] = dp[i][j-1] + dp[i-1][j]"],
+      "answer": "B"
+    },
+    {
+      "id": "arrays_001",
+      "concept": "arrays",
+      "difficulty": 1,
+      "question": "What is the time complexity of accessing an element in an array by index?",
+      "options": ["A) O(n)", "B) O(log n)", "C) O(1)", "D) O(n^2)"],
+      "answer": "C"
+    },
+    {
+      "id": "arrays_002",
+      "concept": "arrays",
+      "difficulty": 1,
+      "question": "What is the main property of a contiguous array in memory?",
+      "options": ["A) Elements are linked via pointers", "B) Elements are stored in adjacent memory locations enabling O(1) index access", "C) Elements are sorted automatically", "D) The size can change dynamically without reallocation"],
+      "answer": "B"
+    },
+    {
+      "id": "arrays_003",
+      "concept": "arrays",
+      "difficulty": 1,
+      "question": "Which operation on an unsorted array runs in O(n) time?",
+      "options": ["A) Index-based access", "B) Linear search for a value", "C) Updating an element at a known index", "D) Reading the first element"],
+      "answer": "B"
+    },
+    {
+      "id": "arrays_004",
+      "concept": "arrays",
+      "difficulty": 2,
+      "question": "What technique uses two indices moving toward each other to solve array problems efficiently?",
+      "options": ["A) Sliding window", "B) Two pointers", "C) Prefix sum", "D) Binary search"],
+      "answer": "B"
+    },
+    {
+      "id": "arrays_005",
+      "concept": "arrays",
+      "difficulty": 2,
+      "question": "A prefix sum array allows range sum queries in what time complexity after O(n) preprocessing?",
+      "options": ["A) O(n)", "B) O(log n)", "C) O(1)", "D) O(n^2)"],
+      "answer": "C"
+    },
+    {
+      "id": "arrays_006",
+      "concept": "arrays",
+      "difficulty": 2,
+      "question": "What is the sliding window technique best used for?",
+      "options": ["A) Sorting arrays in-place", "B) Finding contiguous subarrays satisfying a condition without re-examining all elements", "C) Binary search on sorted arrays", "D) Detecting cycles in arrays"],
+      "answer": "B"
+    },
+    {
+      "id": "arrays_007",
+      "concept": "arrays",
+      "difficulty": 3,
+      "question": "When is Kadane's algorithm used, and what does it find in O(n)?",
+      "options": ["A) Sorting; finds the minimum element", "B) Maximum subarray sum; uses local/global max tracking", "C) Finding duplicates; uses a hash map", "D) Merging arrays; uses two-pointer iteration"],
+      "answer": "B"
+    },
+    {
+      "id": "arrays_008",
+      "concept": "arrays",
+      "difficulty": 3,
+      "question": "Why does inserting into the middle of an array cost O(n)?",
+      "options": ["A) Memory must be reallocated entirely", "B) All elements after the insertion point must be shifted right", "C) The array must be re-sorted after insertion", "D) The index must be recalculated for every element"],
+      "answer": "B"
+    },
+    {
+      "id": "arrays_009",
+      "concept": "arrays",
+      "difficulty": 3,
+      "question": "The Dutch National Flag algorithm partitions an array into 3 groups in what complexity?",
+      "options": ["A) O(n log n) time, O(n) space", "B) O(n) time, O(1) space using three-pointer approach", "C) O(n^2) time, O(1) space", "D) O(n) time, O(n) space"],
+      "answer": "B"
+    },
+    {
+      "id": "arrays_010",
+      "concept": "arrays",
+      "difficulty": 1,
+      "question": "What is the time complexity of iterating over all elements in an array of size n?",
+      "options": ["A) O(1)", "B) O(log n)", "C) O(n)", "D) O(n^2)"],
+      "answer": "C"
+    },
+    {
+      "id": "stack_001",
+      "concept": "stack",
+      "difficulty": 1,
+      "question": "Which order does a stack follow for adding and removing elements?",
+      "options": ["A) First In First Out (FIFO)", "B) Last In First Out (LIFO)", "C) Random order", "D) Priority-based order"],
+      "answer": "B"
+    },
+    {
+      "id": "stack_002",
+      "concept": "stack",
+      "difficulty": 1,
+      "question": "What operation adds an element to the top of a stack?",
+      "options": ["A) enqueue", "B) pop", "C) push", "D) insert"],
+      "answer": "C"
+    },
+    {
+      "id": "stack_003",
+      "concept": "stack",
+      "difficulty": 1,
+      "question": "What happens when you pop from an empty stack?",
+      "options": ["A) Returns None automatically", "B) Returns 0 as default", "C) Stack underflow error", "D) The stack resets to initial state"],
+      "answer": "C"
+    },
+    {
+      "id": "stack_004",
+      "concept": "stack",
+      "difficulty": 2,
+      "question": "Which data structure is commonly used to implement function call tracking in programming languages?",
+      "options": ["A) Queue", "B) Call stack", "C) Heap", "D) Hash table"],
+      "answer": "B"
+    },
+    {
+      "id": "stack_005",
+      "concept": "stack",
+      "difficulty": 2,
+      "question": "How can a stack be used to check balanced parentheses in an expression?",
+      "options": ["A) Count opening and closing brackets separately", "B) Push opening brackets, pop when matching closing bracket is found; error if mismatch or non-empty at end", "C) Sort the expression first then compare", "D) Use recursion without any stack structure"],
+      "answer": "B"
+    },
+    {
+      "id": "stack_006",
+      "concept": "stack",
+      "difficulty": 2,
+      "question": "What is the time complexity of push and pop operations on a stack implemented with an array?",
+      "options": ["A) O(n) for both", "B) O(log n) for both", "C) O(1) amortized for both", "D) O(1) push, O(n) pop"],
+      "answer": "C"
+    },
+    {
+      "id": "stack_007",
+      "concept": "stack",
+      "difficulty": 3,
+      "question": "The monotonic stack technique maintains what property to solve next-greater-element problems?",
+      "options": ["A) Elements sorted in descending order using repeated pops", "B) Stack where elements are always in increasing or decreasing order by popping violating elements", "C) Stack with at most O(log n) elements at any time", "D) Two stacks operating in sync"],
+      "answer": "B"
+    },
+    {
+      "id": "stack_008",
+      "concept": "stack",
+      "difficulty": 3,
+      "question": "How does a min-stack maintain O(1) getMin() alongside normal push/pop?",
+      "options": ["A) By sorting on each push", "B) By maintaining a parallel stack that tracks the current minimum at each level", "C) By scanning all elements on getMin()", "D) By storing elements in a heap"],
+      "answer": "B"
+    },
+    {
+      "id": "stack_009",
+      "concept": "stack",
+      "difficulty": 3,
+      "question": "Why is a stack the natural data structure for implementing DFS on a graph iteratively?",
+      "options": ["A) DFS needs random access to elements", "B) DFS explores one branch fully before backtracking, matching the LIFO property of a stack", "C) Stacks provide O(1) membership testing", "D) DFS requires processing nodes in sorted order"],
+      "answer": "B"
+    },
+    {
+      "id": "stack_010",
+      "concept": "stack",
+      "difficulty": 1,
+      "question": "Which operation allows you to look at the top element without removing it?",
+      "options": ["A) pop", "B) push", "C) peek (or top)", "D) dequeue"],
+      "answer": "C"
+    },
+    {
+      "id": "trees_001",
+      "concept": "trees",
+      "difficulty": 1,
+      "question": "In a binary tree, what is a leaf node?",
+      "options": ["A) The root node", "B) A node with exactly one child", "C) A node with no children", "D) The deepest node in the tree"],
+      "answer": "C"
+    },
+    {
+      "id": "trees_002",
+      "concept": "trees",
+      "difficulty": 1,
+      "question": "Which traversal visits the root node before its children?",
+      "options": ["A) Inorder", "B) Postorder", "C) Preorder", "D) Level-order"],
+      "answer": "C"
+    },
+    {
+      "id": "trees_003",
+      "concept": "trees",
+      "difficulty": 1,
+      "question": "What is the height of a tree with only a root node?",
+      "options": ["A) -1", "B) 0", "C) 1", "D) 2"],
+      "answer": "B"
+    },
+    {
+      "id": "trees_004",
+      "concept": "trees",
+      "difficulty": 2,
+      "question": "In a Binary Search Tree (BST), what is the relationship between a node and its subtrees?",
+      "options": ["A) Left subtree values > node value; right subtree values < node value", "B) Left subtree values < node value; right subtree values > node value", "C) All subtree values equal the node value", "D) The tree is always balanced"],
+      "answer": "B"
+    },
+    {
+      "id": "trees_005",
+      "concept": "trees",
+      "difficulty": 2,
+      "question": "Which traversal of a BST produces elements in sorted order?",
+      "options": ["A) Preorder", "B) Postorder", "C) Inorder (left, root, right)", "D) Level-order"],
+      "answer": "C"
+    },
+    {
+      "id": "trees_006",
+      "concept": "trees",
+      "difficulty": 2,
+      "question": "What is the worst-case time complexity of search in an unbalanced BST?",
+      "options": ["A) O(log n)", "B) O(1)", "C) O(n) when the tree degenerates to a linked list", "D) O(n log n)"],
+      "answer": "C"
+    },
+    {
+      "id": "trees_007",
+      "concept": "trees",
+      "difficulty": 3,
+      "question": "What makes an AVL tree self-balancing?",
+      "options": ["A) Elements are inserted in sorted order", "B) It performs rotations when the height difference between left and right subtrees exceeds 1", "C) It uses a hash function to place nodes", "D) The tree stores only unique elements"],
+      "answer": "B"
+    },
+    {
+      "id": "trees_008",
+      "concept": "trees",
+      "difficulty": 3,
+      "question": "Why does finding the lowest common ancestor (LCA) of two nodes use tree traversal?",
+      "options": ["A) To sort the nodes before comparing", "B) To identify the deepest node that is an ancestor of both target nodes by traversing from root", "C) To count the total number of nodes", "D) To rebuild the tree with nodes as roots"],
+      "answer": "B"
+    },
+    {
+      "id": "trees_009",
+      "concept": "trees",
+      "difficulty": 3,
+      "question": "A segment tree supports range queries and point updates in what time complexity?",
+      "options": ["A) O(n) query, O(1) update", "B) O(log n) for both query and update", "C) O(1) query, O(n) update", "D) O(n log n) for both"],
+      "answer": "B"
+    },
+    {
+      "id": "trees_010",
+      "concept": "trees",
+      "difficulty": 1,
+      "question": "What is the parent node of the root in a tree?",
+      "options": ["A) The leftmost child", "B) Itself", "C) None — the root has no parent", "D) The deepest leaf"],
+      "answer": "C"
+    },
+    {
+      "id": "backtracking_001",
+      "concept": "backtracking",
+      "difficulty": 1,
+      "question": "What is the core idea of backtracking?",
+      "options": ["A) Always commit to the first choice made", "B) Explore all candidates and undo (backtrack) when a dead end is reached", "C) Use dynamic programming to cache results", "D) Sort candidates before exploring them"],
+      "answer": "B"
+    },
+    {
+      "id": "backtracking_002",
+      "concept": "backtracking",
+      "difficulty": 1,
+      "question": "Backtracking is most efficient when combined with which technique?",
+      "options": ["A) Memoization", "B) Pruning — eliminating candidates that cannot lead to valid solutions early", "C) Randomization", "D) Iterative deepening"],
+      "answer": "B"
+    },
+    {
+      "id": "backtracking_003",
+      "concept": "backtracking",
+      "difficulty": 1,
+      "question": "Which classic problem is solved using backtracking by placing queens row by row?",
+      "options": ["A) Traveling Salesman Problem", "B) N-Queens Problem", "C) Shortest Path Problem", "D) Matrix Multiplication"],
+      "answer": "B"
+    },
+    {
+      "id": "backtracking_004",
+      "concept": "backtracking",
+      "difficulty": 2,
+      "question": "In a recursive backtracking solution, what must happen before returning from a recursive call?",
+      "options": ["A) The result must be memoized", "B) The state must be restored (undo the last choice) to enable exploring other candidates", "C) The recursion depth must be logged", "D) All remaining candidates must be skipped"],
+      "answer": "B"
+    },
+    {
+      "id": "backtracking_005",
+      "concept": "backtracking",
+      "difficulty": 2,
+      "question": "Why does generating all permutations of n elements use O(n!) time?",
+      "options": ["A) Backtracking explores every possible ordering without any pruning", "B) The number of distinct permutations is n! and each must be visited", "C) The recursion depth is n! levels deep", "D) Each permutation requires O(n!) comparisons to validate"],
+      "answer": "B"
+    },
+    {
+      "id": "backtracking_006",
+      "concept": "backtracking",
+      "difficulty": 2,
+      "question": "In the subset sum backtracking approach, how is the search space reduced?",
+      "options": ["A) By trying all subsets iteratively", "B) By pruning branches where the running sum already exceeds the target", "C) By sorting elements in reverse order", "D) By memoizing partial sums"],
+      "answer": "B"
+    },
+    {
+      "id": "backtracking_007",
+      "concept": "backtracking",
+      "difficulty": 3,
+      "question": "How does constraint propagation improve backtracking in problems like Sudoku?",
+      "options": ["A) It sorts candidates to try the best first", "B) It reduces the domain of remaining variables by applying constraints after each assignment, avoiding invalid branches", "C) It memoizes all board states", "D) It converts the problem to dynamic programming"],
+      "answer": "B"
+    },
+    {
+      "id": "backtracking_008",
+      "concept": "backtracking",
+      "difficulty": 3,
+      "question": "What is the difference between backtracking and brute force?",
+      "options": ["A) Backtracking is always faster because it uses memoization", "B) Backtracking prunes the search tree by detecting dead ends early; brute force explores all possibilities", "C) Brute force uses recursion while backtracking uses iteration", "D) There is no difference — they are the same algorithm"],
+      "answer": "B"
+    },
+    {
+      "id": "backtracking_009",
+      "concept": "backtracking",
+      "difficulty": 3,
+      "question": "In graph coloring with backtracking, when is a partial coloring pruned?",
+      "options": ["A) When the current node has more edges than others", "B) When assigning a color to the current node conflicts with an adjacent already-colored node", "C) When the number of colors exceeds the number of nodes", "D) After every coloring assignment regardless of conflicts"],
+      "answer": "B"
+    },
+    {
+      "id": "backtracking_010",
+      "concept": "backtracking",
+      "difficulty": 1,
+      "question": "Which approach does backtracking use to explore solutions?",
+      "options": ["A) Bottom-up dynamic programming", "B) Greedy selection", "C) Recursive exploration with undoing of choices", "D) Iterative breadth-first search"],
+      "answer": "C"
+    }
+  ]
+}
