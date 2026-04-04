@@ -21,6 +21,8 @@ Example with Docker:
     ...     env.close()
 """
 
+from typing import Any, Dict, Optional
+
 from openenv.core.mcp_client import MCPToolClient
 
 
@@ -38,4 +40,20 @@ class AdaptiveTutorEnv(MCPToolClient):
     - from_env(hf_space_id)
     """
 
-    pass
+    async def get_mastery_state(self) -> Dict[str, Any]:
+        """Return the student's current concept mastery levels and weakest concept."""
+        return await self.call_tool("get_mastery_state")
+
+    async def get_current_question(self) -> Dict[str, Any]:
+        """Return the question the student got wrong along with their wrong answer."""
+        return await self.call_tool("get_current_question")
+
+    async def submit_explanation(
+        self, explanation: str, worked_example: str
+    ) -> Dict[str, Any]:
+        """Submit an explanation and worked example. Ends the episode."""
+        return await self.call_tool(
+            "submit_explanation",
+            explanation=explanation,
+            worked_example=worked_example,
+        )
