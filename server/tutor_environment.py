@@ -30,7 +30,7 @@ from openenv.core.env_server.mcp_environment import MCPEnvironment
 from openenv.core.env_server.mcp_types import CallToolAction
 from openenv.core.env_server.types import Action, Observation
 
-from .models import (
+from ..models import (
     DIFFICULTY_LABELS,
     TASK_DIFFICULTY,
     TASKS,

@@ -13,7 +13,7 @@ from math import ceil
 from random import Random
 from typing import Dict, List, Optional, Tuple
 
-from .models import DIFFICULTY_LABELS, TASK_DIFFICULTY, Question
+from ..models import DIFFICULTY_LABELS, TASK_DIFFICULTY, Question
 
 
 # Default starting mastery for a new student (weak in dp / backtracking / trees)

@@ -250,17 +250,17 @@ def make_env_factory(image_name: Optional[str], server_url: Optional[str] = None
 
     async def factory(task: str):
         if image_name:
-            from envs.adaptive_tutor_env.client import AdaptiveTutorEnv
+            from adaptive_tutor_env.client import AdaptiveTutorEnv
 
             return await AdaptiveTutorEnv.from_docker_image(image_name)
 
         if server_url:
-            from envs.adaptive_tutor_env.client import AdaptiveTutorEnv
+            from adaptive_tutor_env.client import AdaptiveTutorEnv
 
             return AdaptiveTutorEnv(base_url=server_url)
 
         # In-process fallback — wraps the environment in an async adapter
-        from envs.adaptive_tutor_env.server.tutor_environment import AdaptiveTutorEnvironment
+        from adaptive_tutor_env.server.tutor_environment import AdaptiveTutorEnvironment
         from openenv.core.env_server.mcp_types import CallToolAction, ListToolsAction
 
         env = AdaptiveTutorEnvironment()
