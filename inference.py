@@ -35,7 +35,7 @@ from typing import Any, Dict, List, Optional
 API_BASE_URL: str = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
 MODEL_NAME: str = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
 API_KEY: Optional[str] = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
-IMAGE_NAME: Optional[str] = os.getenv("LOCAL_IMAGE_NAME")
+IMAGE_NAME: Optional[str] = os.getenv(" ")
 
 TASKS: List[str] = ["concept_recall", "application_practice", "advanced_analysis"]
 SUCCESS_THRESHOLD: float = 0.3  # reward >= threshold → success
@@ -256,8 +256,33 @@ def make_env_factory(image_name: Optional[str], server_url: Optional[str] = None
 
         if server_url:
             from adaptive_tutor_env.client import AdaptiveTutorEnv
+            from openenv.core.env_server.mcp_types import CallToolAction, ListToolsAction
 
-            return AdaptiveTutorEnv(base_url=server_url)
+            _client = AdaptiveTutorEnv(base_url=server_url)
+
+            class _ClientAdapter:
+                """Converts dict actions to typed actions before forwarding to MCPToolClient."""
+
+                async def reset(self, **kwargs):
+                    return await _client.reset(**kwargs)
+
+                async def step(self, action_dict):
+                    atype = action_dict.get("type")
+                    if atype == "list_tools":
+                        return await _client.step(ListToolsAction())
+                    elif atype == "call_tool":
+                        return await _client.step(
+                            CallToolAction(
+                                tool_name=action_dict["tool_name"],
+                                arguments=action_dict.get("arguments", {}),
+                            )
+                        )
+                    raise ValueError(f"Unknown action type: {atype}")
+
+                async def close(self):
+                    await _client.close()
+
+            return _ClientAdapter()
 
         # In-process fallback — wraps the environment in an async adapter
         from adaptive_tutor_env.server.tutor_environment import AdaptiveTutorEnvironment
