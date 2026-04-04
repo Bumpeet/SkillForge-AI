@@ -9,7 +9,7 @@ Three graders matching the hackathon specification:
 
 from typing import Optional
 
-from ..models import TASK_DIFFICULTY
+from models import TASK_DIFFICULTY
 
 
 def grade_easy(prev_skill: float, new_skill: float) -> float:
