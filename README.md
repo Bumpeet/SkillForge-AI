@@ -37,8 +37,8 @@ The environment tracks per-concept mastery for a simulated student across 5 DSA 
 ### Using Docker
 
 ```bash
-# Build the image (from OpenEnv repo root)
-docker build -t adaptive-tutor:latest -f envs/adaptive_tutor_env/server/Dockerfile .
+# Build the image (from the adaptive_tutor_env directory)
+docker build -t adaptive-tutor:latest .
 
 # Run the server
 docker run -p 8000:8000 adaptive-tutor:latest
@@ -48,7 +48,7 @@ docker run -p 8000:8000 adaptive-tutor:latest
 
 ```python
 import asyncio
-from envs.adaptive_tutor_env import AdaptiveTutorEnv, CallToolAction, ListToolsAction
+from adaptive_tutor_env import AdaptiveTutorEnv, CallToolAction, ListToolsAction
 
 async def main():
     async with AdaptiveTutorEnv(base_url="http://localhost:8000") as env:
@@ -196,15 +196,14 @@ step(submit_explanation(explanation=..., worked_example=...))
 ## Development
 
 ```bash
-# Install dependencies (from OpenEnv repo root)
-uv sync --all-extras
+# Install dependencies
+pip install -e .
 
 # Run tests
-PYTHONPATH=src:envs uv run pytest tests/envs/test_adaptive_tutor_environment.py -v
+pytest tests/ -v
 
 # Run server locally
-cd envs/adaptive_tutor_env
-PYTHONPATH=../../src uvicorn server.app:app --reload --port 8000
+uvicorn adaptive_tutor_env.server.app:app --reload --port 8000
 
 # Health check
 curl http://localhost:8000/health
@@ -216,6 +215,9 @@ curl http://localhost:8000/health
 adaptive_tutor_env/
 ├── __init__.py                  # Exports AdaptiveTutorEnv, CallToolAction, ListToolsAction
 ├── client.py                    # AdaptiveTutorEnv(MCPToolClient)
+├── models.py                    # TutorState, Question dataclasses
+├── inference.py                 # Hackathon evaluation script (LLM agent runner)
+├── Dockerfile                   # Container image definition
 ├── openenv.yaml                 # OpenEnv spec (name, runtime, port)
 ├── pyproject.toml               # Package dependencies
 ├── README.md                    # This file (also HuggingFace Space card)
@@ -225,10 +227,8 @@ adaptive_tutor_env/
     ├── __init__.py
     ├── app.py                   # create_app(AdaptiveTutorEnvironment, ...)
     ├── tutor_environment.py     # MCPEnvironment subclass with 3 MCP tools
-    ├── models.py                # TutorState, Question dataclasses
     ├── student_model.py         # simulate_student, score_explanation, update_mastery
-    ├── rewards.py               # grade_easy, grade_medium, grade_hard, compute_reward
-    └── Dockerfile               # Container image definition
+    └── rewards.py               # grade_easy, grade_medium, grade_hard, compute_reward
 ```
 
 ## Integration with RL Frameworks
@@ -237,7 +237,7 @@ adaptive_tutor_env/
 
 ```python
 import asyncio
-from envs.adaptive_tutor_env import AdaptiveTutorEnv, CallToolAction
+from adaptive_tutor_env import AdaptiveTutorEnv, CallToolAction
 
 async def rollout_func(prompts, completions, **kwargs):
     rewards = []
@@ -255,7 +255,7 @@ async def rollout_func(prompts, completions, **kwargs):
 ### Direct In-Process (no server needed)
 
 ```python
-from envs.adaptive_tutor_env.server.tutor_environment import AdaptiveTutorEnvironment
+from adaptive_tutor_env.server.tutor_environment import AdaptiveTutorEnvironment
 from openenv.core.env_server.mcp_types import CallToolAction
 
 env = AdaptiveTutorEnvironment()
