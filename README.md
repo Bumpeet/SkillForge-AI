@@ -1,6 +1,6 @@
 ---
 title: Adaptive Tutor Environment Server
-emoji: 🧑‍🏫
+emoji: 📚
 colorFrom: green
 colorTo: blue
 sdk: docker
@@ -18,7 +18,7 @@ tags:
 
 An RL environment where an LLM agent acts as a personalized DSA (Data Structures & Algorithms) tutor. The agent generates targeted explanations for concepts a simulated student is struggling with, and is rewarded when the student improves on a follow-up question.
 
-**Hackathon**: Meta × Hugging Face OpenEnv Challenge
+**Hackathon**: Meta x Hugging Face OpenEnv Challenge
 
 ## Overview
 
@@ -30,7 +30,7 @@ The environment tracks per-concept mastery for a simulated student across 5 DSA 
 4. Simulates the student on a **follow-up question** to measure improvement
 5. Returns a **reward** proportional to learning gain
 
-**Why this matters**: Adaptive explanation generation is an unsolved problem in ed-tech. This environment trains agents to optimize *how* to explain concepts, not just generate content — grounding reward in measurable student improvement.
+**Why this matters**: Adaptive explanation generation is an unsolved problem in ed-tech. This environment trains agents to optimize *how* to explain concepts, not just generate content - grounding reward in measurable student improvement.
 
 ## Quick Start
 
@@ -52,7 +52,7 @@ from adaptive_tutor_env import AdaptiveTutorEnv, CallToolAction, ListToolsAction
 
 async def main():
     async with AdaptiveTutorEnv(base_url="http://localhost:8000") as env:
-        # Reset — picks weakest concept, presents failed question
+        # Reset - picks weakest concept, presents failed question
         obs = await env.reset(task="concept_recall")
         print(f"Concept: {obs.metadata['concept']}")
         print(f"Question: {obs.metadata['question']}")
@@ -66,7 +66,7 @@ async def main():
             tool_name="get_current_question", arguments={}
         ))
 
-        # Submit explanation — ends the episode
+        # Submit explanation - ends the episode
         result = await env.step(CallToolAction(
             tool_name="submit_explanation",
             arguments={
@@ -100,9 +100,9 @@ Tasks are selected via `reset(task=...)`. Each task uses a different difficulty 
 
 | Task | Difficulty | What the agent must explain | Grader |
 |------|-----------|----------------------------|--------|
-| `concept_recall` | Easy (1) | *What* the concept is — definitions, properties | `grade_easy`: reward ∝ mastery gain |
+| `concept_recall` | Easy (1) | *What* the concept is - definitions, properties | `grade_easy`: reward ~ mastery gain |
 | `application_practice` | Medium (2) | *How* to apply the concept to a problem | `grade_medium`: reward for correcting the error |
-| `advanced_analysis` | Hard (3) | *Why* and *when* — trade-offs, complexity | `grade_hard`: mastery gain + difficulty bonus |
+| `advanced_analysis` | Hard (3) | *Why* and *when* - trade-offs, complexity | `grade_hard`: mastery gain + difficulty bonus |
 
 ## DSA Concepts
 
@@ -134,7 +134,7 @@ Reward is dispatched by task difficulty:
 ```
 reward = min(max((new_skill - prev_skill) * 2, 0), 1)
 ```
-Rewards any mastery gain — partial credit for partial explanations.
+Rewards any mastery gain - partial credit for partial explanations.
 
 **`grade_medium`** (application_practice):
 ```
