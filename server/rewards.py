@@ -11,6 +11,8 @@ from typing import Optional
 
 from ..models import TASK_DIFFICULTY
 
+_EPS = 1e-6  # Scores must be strictly (0, 1), never exactly 0.0 or 1.0
+
 
 def grade_easy(prev_skill: float, new_skill: float) -> float:
     """
@@ -109,8 +111,9 @@ def compute_reward(
     """
     difficulty_int = TASK_DIFFICULTY.get(task, 1)
     if difficulty_int == 1:
-        return grade_easy(prev_skill, new_skill)
+        raw = grade_easy(prev_skill, new_skill)
     elif difficulty_int == 2:
-        return grade_medium(prev_error, new_error, correct)
+        raw = grade_medium(prev_error, new_error, correct)
     else:
-        return grade_hard(prev_skill, new_skill, difficulty_label, correct)
+        raw = grade_hard(prev_skill, new_skill, difficulty_label, correct)
+    return max(_EPS, min(1.0 - _EPS, raw))

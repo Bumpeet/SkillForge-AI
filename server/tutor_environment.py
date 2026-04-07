@@ -37,7 +37,7 @@ from ..models import (
     Question,
     TutorState,
 )
-from .rewards import compute_reward
+from .rewards import _EPS, compute_reward
 from .student_model import (
     DEFAULT_MASTERY,
     load_questions,
@@ -225,7 +225,7 @@ class AdaptiveTutorEnvironment(MCPEnvironment):
 
         return Observation(
             done=False,
-            reward=0.0,
+            reward=_EPS,
             metadata={
                 "task": task,
                 "concept": concept,
@@ -290,7 +290,7 @@ class AdaptiveTutorEnvironment(MCPEnvironment):
     ) -> Observation:
         return Observation(
             done=False,
-            reward=0.0,
+            reward=_EPS,
             metadata={
                 "error": (
                     f"Unknown action type: {type(action).__name__}. "
