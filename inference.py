@@ -14,7 +14,7 @@ Required environment variables:
 Stdout format (mandatory per hackathon spec):
     [START] task=<task_name> env=adaptive_tutor_env model=<model_name>
     [STEP]  step=<n> action=<action_str> reward=<0.00> done=<true|false> error=<msg|null>
-    [END]   success=<true|false> steps=<n> rewards=<r1,r2,...,rn>
+    [END]   success=<true|false> steps=<n> score=<score> rewards=<r1,r2,...,rn>
 
 Example usage:
     HF_TOKEN=hf_xxx python inference.py
@@ -39,6 +39,7 @@ IMAGE_NAME: Optional[str] = os.getenv(" ")
 
 TASKS: List[str] = ["concept_recall", "application_practice", "advanced_analysis"]
 SUCCESS_THRESHOLD: float = 0.3  # reward >= threshold → success
+_EPS: float = 1e-6  # ensures scores are strictly between 0 and 1
 TEMPERATURE: float = 0.7
 MAX_TOKENS: int = 800
 
@@ -87,10 +88,10 @@ def log_step(
     )
 
 
-def log_end(success: bool, steps: int, rewards: List[float]) -> None:
+def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
     print(
-        f"[END] success={str(success).lower()} steps={steps} rewards={rewards_str}",
+        f"[END] success={str(success).lower()} steps={steps} score={score:.6f} rewards={rewards_str}",
         flush=True,
     )
 
@@ -155,6 +156,7 @@ async def run_task(task: str, client: Any, env_factory) -> None:
     """Run one full episode for the given task and emit [START]/[STEP]/[END] logs."""
     rewards: List[float] = []
     steps_taken: int = 0
+    score: float = _EPS
     success: bool = False
     env = None
 
@@ -210,19 +212,21 @@ async def run_task(task: str, client: Any, env_factory) -> None:
             }
         )
 
-        reward = float(final_obs.reward) if final_obs.reward is not None else 0.0
+        reward = float(final_obs.reward) if final_obs.reward is not None else _EPS
         done = bool(final_obs.done)
         log_step(3, action_str, reward, done, None)
         rewards.append(reward)
         steps_taken = 3
 
-        success = reward >= SUCCESS_THRESHOLD
+        score = max(_EPS, min(1.0 - _EPS, reward))
+        success = score >= SUCCESS_THRESHOLD
 
     except Exception as exc:
         print(f"[DEBUG] Episode error: {exc}", flush=True)
         # Ensure we still emit [END]
         if not rewards:
-            rewards = [0.0]
+            rewards = [_EPS]
+        score = _EPS
 
     finally:
         if env is not None:
@@ -230,7 +234,7 @@ async def run_task(task: str, client: Any, env_factory) -> None:
                 await env.close()
             except Exception:
                 pass
-        log_end(success, steps_taken, rewards)
+        log_end(success, steps_taken, score, rewards)
 
 
 # ---------------------------------------------------------------------------
