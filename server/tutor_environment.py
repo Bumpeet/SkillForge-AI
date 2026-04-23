@@ -308,15 +308,31 @@ class AdaptiveTutorEnvironment(MCPEnvironment):
         difficulty_label = self._state.difficulty_label
         prev_skill = self._state.prev_skill
 
+        # Extract past questions the student got wrong from history
+        past_wrong_questions = [
+            h["question"]
+            for h in self._state.history
+            if not h.get("correct") and h.get("question")
+        ]
+
         # 1. Score explanation quality
         explanation_scores = score_explanation_with_judge(
-            explanation, concept, self._judge_client
+            explanation,
+            concept,
+            self._judge_client,
+            mastery=prev_skill,
+            past_wrong_questions=past_wrong_questions,
+            difficulty=difficulty,
         )
         explanation_quality = float(explanation_scores.get("final_score", 0.5))
 
         # 2. Score question quality
         question_scores = score_question_with_judge(
-            question, concept, difficulty, self._judge_client
+            question,
+            concept,
+            difficulty,
+            self._judge_client,
+            explanation=explanation,
         )
         question_quality = float(question_scores.get("final_score", 0.5))
 
@@ -341,6 +357,7 @@ class AdaptiveTutorEnvironment(MCPEnvironment):
             "step": self._state.step_count,
             "concept": concept,
             "difficulty": difficulty_label,
+            "question": question,
             "explanation_quality": round(explanation_quality, 4),
             "question_quality": round(question_quality, 4),
             "correct": correct,
@@ -378,7 +395,7 @@ class AdaptiveTutorEnvironment(MCPEnvironment):
                 "explanation_quality": explanation_quality,
                 "explanation_subscores": {
                     k: explanation_scores.get(k)
-                    for k in ("correctness", "clarity", "example_quality", "depth")
+                    for k in ("correctness", "clarity", "example_quality", "relevance", "depth")
                 },
                 "explanation_issues": explanation_scores.get("issues", []),
                 "question_quality": question_quality,
@@ -386,10 +403,10 @@ class AdaptiveTutorEnvironment(MCPEnvironment):
                     k: question_scores.get(k)
                     for k in (
                         "relevance",
+                        "alignment",
                         "difficulty_match",
                         "clarity",
                         "non_triviality",
-                        "answerability",
                     )
                 },
                 "student_correct": correct,

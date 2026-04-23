@@ -16,7 +16,7 @@ tags:
 
 # Adaptive Tutor Environment
 
-An RL environment where an LLM agent acts as a personalized DSA (Data Structures & Algorithms) tutor. The agent generates a targeted **question + explanation** conditioned on the student's mastery and difficulty, evaluated by a judge model (ChatGPT), with reward driven by measurable student learning gain.
+An RL environment where an LLM agent acts as a personalized DSA (Data Structures & Algorithms) tutor. The agent generates a targeted **explanation** and a **question** conditioned on the student's mastery, difficulty, and past mistakes — evaluated by a judge model (ChatGPT), with reward driven by measurable student learning gain.
 
 **Hackathon**: Meta x Hugging Face OpenEnv Challenge
 
@@ -26,11 +26,12 @@ The environment tracks per-concept mastery for a simulated student across 5 DSA 
 
 1. Identifies the student's **weakest concept** (lowest mastery score)
 2. Sets **difficulty** based on the active task
-3. Waits for the agent to submit a **question + explanation** conditioned on `{concept, mastery, difficulty}`
-4. A **judge model (ChatGPT)** scores explanation quality and question quality
-5. A **simulated student** attempts the question (sigmoid probability model)
-6. **Mastery is updated** — faster if correct (α=0.3), slower if not (β=0.1)
-7. Returns a **composite reward** across 5 weighted signals
+3. Agent generates an **explanation** conditioned on `{concept, mastery, difficulty, past_wrong_questions}`
+4. Agent generates a **question** conditioned on `{concept, difficulty, explanation}`
+5. A **judge model (ChatGPT)** scores explanation quality (5 criteria) and question quality (5 criteria)
+6. A **simulated student** attempts the question (sigmoid probability model)
+7. **Mastery is updated** — faster if correct (α=0.2), slower if not (β=0.05)
+8. Returns a **composite reward** across 5 weighted signals
 
 **Why this matters**: Adaptive explanation generation is an unsolved problem in ed-tech. This environment trains agents to optimize *how* to explain concepts — grounding reward in measurable student improvement and teaching quality.
 
@@ -39,17 +40,19 @@ The environment tracks per-concept mastery for a simulated student across 5 DSA 
 ## End-to-End Flow
 
 ```
-state = {concept, mastery, difficulty, history}
+state = {concept, mastery, difficulty, history, past_wrong_questions}
     ↓
-Agent (Qwen) generates {question, explanation}
+Qwen call 1: explanation = generate_explanation(concept, mastery, difficulty, past_wrong_questions)
     ↓
-ChatGPT judges explanation quality → {correctness, clarity, example_quality, depth}
-ChatGPT judges question quality   → {relevance, difficulty_match, clarity, ...}
+Qwen call 2: question = generate_question(concept, difficulty, explanation)
+    ↓
+ChatGPT judges explanation → {correctness, clarity, example_quality, relevance, depth}
+ChatGPT judges question    → {relevance, alignment, difficulty_match, clarity, non_triviality}
     ↓
 Student simulation: P(correct) = sigmoid((mastery - bias) / temp) + guess - slip
     ↓
-Mastery update: mastery += α * quality  (if correct)
-                mastery += β * quality  (if wrong)
+Mastery update: mastery += α * explanation_quality  (if correct, α=0.2)
+                mastery += β * explanation_quality  (if wrong,   β=0.05)
     ↓
 Composite reward = w1*mastery_gain + w2*correct + w3*difficulty_bonus
                  + w4*explanation_quality + w5*question_quality
@@ -174,27 +177,56 @@ The agent has access to 2 MCP tools:
 
 ---
 
-## Agent Prompt (Qwen)
+## Agent Prompts (Qwen)
+
+The agent makes **two separate LLM calls** per episode.
+
+### Step 1 — Generate Explanation
 
 ```
 You are an expert DSA tutor.
 
 INPUT:
 - Concept: {concept}
-- Student mastery: {mastery} (0 to 1)
-- Target difficulty: {difficulty} (1=easy, 2=medium, 3=hard)
+- Current mastery: {mastery} (0–1)
+- Previous mistakes: {past_wrong_questions}
+- Target difficulty: {difficulty}
 
 TASK:
-1. Generate ONE question for the concept at the specified difficulty.
-2. Generate a clear explanation adapted to the student's mastery level.
+Generate learning material to improve the student.
 
-OUTPUT FORMAT (strict JSON):
-{
-  "question": "...",
-  "explanation": "...",
-  "difficulty": {difficulty},
-  "concept": "{concept}"
-}
+GUIDELINES:
+- Focus on mistakes from previous questions
+- Adapt to mastery:
+  - <0.3 → simple, intuitive, step-by-step
+  - 0.3–0.7 → balanced explanation + examples
+  - >0.7 → concise, focus on edge cases
+- Include: intuition, key idea, worked example
+
+OUTPUT (strict JSON):
+{"explanation": "..."}
+```
+
+### Step 2 — Generate Question (conditioned on explanation)
+
+```
+You are an expert problem setter.
+
+INPUT:
+- Concept: {concept}
+- Difficulty: {difficulty}
+- Explanation: {explanation}
+
+TASK:
+Generate ONE question that tests the concepts taught in the explanation.
+
+GUIDELINES:
+- Must directly relate to explanation
+- Match difficulty: Easy → definition, Medium → application, Hard → reasoning
+- Avoid trivial or ambiguous questions
+
+OUTPUT (strict JSON):
+{"question": "..."}
 ```
 
 ---
@@ -203,14 +235,15 @@ OUTPUT FORMAT (strict JSON):
 
 ### Explanation Quality
 
-Scored on 4 criteria (each 0–1), `final_score` = average:
+Scored on 5 criteria (each 0–1), `final_score` = average:
 
 | Subscore | Description |
 |----------|-------------|
 | `correctness` | Technical accuracy |
-| `clarity` | Ease of understanding |
+| `clarity` | Ease of understanding relative to mastery level |
 | `example_quality` | Usefulness of the worked example |
-| `depth` | Appropriate depth for learning |
+| `relevance` | Relevance to the student's past mistakes |
+| `depth` | Appropriate depth for the target difficulty |
 
 ### Question Quality
 
@@ -219,10 +252,10 @@ Scored on 5 criteria (each 0–1), `final_score` = average:
 | Subscore | Description |
 |----------|-------------|
 | `relevance` | Relevance to the concept |
+| `alignment` | Alignment with the explanation content |
 | `difficulty_match` | Matches the target difficulty |
 | `clarity` | Unambiguous wording |
 | `non_triviality` | Not too obvious or trivial |
-| `answerability` | Clearly answerable |
 
 > If `OPENAI_API_KEY` is not set, explanation quality falls back to keyword coverage and question quality defaults to 0.5.
 
@@ -239,10 +272,10 @@ P(correct) = sigmoid((mastery - difficulty_bias) / temperature)
 
 | Parameter | Value |
 |-----------|-------|
-| `temperature` | 0.3 |
+| `temperature` | 0.2 |
 | `guess_prob` | 0.10 |
 | `slip_prob` | 0.05 |
-| `difficulty_bias` | 0.3 / 0.5 / 0.7 for easy / medium / hard |
+| `difficulty_bias` | 0.2 / 0.5 / 0.8 for easy / medium / hard |
 
 ---
 
@@ -251,8 +284,8 @@ P(correct) = sigmoid((mastery - difficulty_bias) / temperature)
 Learning rate depends on whether the student answered correctly:
 
 ```
-if correct:  mastery += α * explanation_quality   (α = 0.3)
-else:        mastery += β * explanation_quality   (β = 0.1)
+if correct:  mastery += α * explanation_quality   (α = 0.2)
+else:        mastery += β * explanation_quality   (β = 0.05)
 
 mastery = min(1.0, mastery)
 ```
@@ -273,7 +306,7 @@ reward = w1 * mastery_gain
 |-----------|--------|-------|
 | Mastery gain `(new − old)` | 0.4 | Encourages genuine learning progress |
 | Student correct | 0.2 | Direct success signal |
-| Difficulty bonus | 0.1 | 0.2 / 0.5 / 1.0 for easy / medium / hard |
+| Difficulty bonus | 0.1 | 0.1 / 0.2 / 0.3 for easy / medium / hard |
 | Explanation quality | 0.2 | Judge score |
 | Question quality | 0.1 | Judge score |
 
@@ -283,19 +316,20 @@ All rewards are clamped to `(1e-6, 1 - 1e-6)`.
 
 ## Episode History
 
-Each completed step appends to `history` (accessible via `get_state()` and final `Observation.metadata`):
+Each completed step appends to `history` (accessible via `get_state()` and final `Observation.metadata`). Past questions the student got wrong are automatically surfaced as `past_wrong_questions` context in the next explanation prompt.
 
 ```json
 {
   "step": 1,
   "concept": "dp",
   "difficulty": "easy",
+  "question": "What is memoization and why is it used in DP?",
   "explanation_quality": 0.82,
   "question_quality": 0.75,
   "correct": true,
   "mastery_before": 0.10,
-  "mastery_after": 0.346,
-  "reward": 0.5484
+  "mastery_after": 0.264,
+  "reward": 0.4284
 }
 ```
 

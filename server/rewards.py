@@ -20,8 +20,8 @@ _EPS = 1e-6  # Scores must be strictly (0, 1), never exactly 0.0 or 1.0
 
 W1, W2, W3, W4, W5 = 0.4, 0.2, 0.1, 0.2, 0.1
 
-# Bonus scales with difficulty so harder tasks earn proportionally more
-DIFFICULTY_BONUS = {1: 0.2, 2: 0.5, 3: 1.0}
+# Bonus scales with difficulty
+DIFFICULTY_BONUS = {1: 0.1, 2: 0.2, 3: 0.3}
 
 
 def compute_reward(
@@ -48,7 +48,7 @@ def compute_reward(
     """
     mastery_gain = max(0.0, new_skill - prev_skill)
     correct_signal = 1.0 if correct else 0.0
-    diff_bonus = DIFFICULTY_BONUS.get(difficulty, 0.2)
+    diff_bonus = DIFFICULTY_BONUS.get(difficulty, 0.1)
 
     raw = (
         W1 * mastery_gain

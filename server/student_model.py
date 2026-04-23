@@ -82,17 +82,17 @@ CONCEPT_KEYWORDS: Dict[str, List[str]] = {
 # Student simulation constants
 # ---------------------------------------------------------------------------
 
-TEMPERATURE: float = 0.3
+TEMPERATURE: float = 0.2
 GUESS_PROB: float = 0.10
 SLIP_PROB: float = 0.05
-DIFFICULTY_BIAS: Dict[int, float] = {1: 0.3, 2: 0.5, 3: 0.7}
+DIFFICULTY_BIAS: Dict[int, float] = {1: 0.2, 2: 0.5, 3: 0.8}
 
 # ---------------------------------------------------------------------------
 # Mastery update constants
 # ---------------------------------------------------------------------------
 
-ALPHA: float = 0.3   # learning rate when student answers correctly
-BETA: float = 0.1    # learning rate when student answers incorrectly (β < α)
+ALPHA: float = 0.2   # learning rate when student answers correctly
+BETA: float = 0.05   # learning rate when student answers incorrectly (β < α)
 
 # ---------------------------------------------------------------------------
 # Judge prompts
@@ -102,19 +102,24 @@ EXPLANATION_JUDGE_PROMPT = (
     "You are an expert evaluator of teaching quality.\n"
     "INPUT:\n"
     "- Concept: {concept}\n"
-    "- Explanation: {explanation}\n\n"
+    "- Explanation: {explanation}\n"
+    "- Student mastery: {mastery}\n"
+    "- Previous mistakes: {past_wrong_questions}\n"
+    "- Target difficulty: {difficulty}\n\n"
     "TASK:\n"
-    "Score the explanation from 0 to 1 based on:\n"
+    "Evaluate how well this explanation will help the student improve.\n\n"
+    "Score (0–1):\n"
     "1. Correctness (technical accuracy)\n"
-    "2. Clarity (easy to understand)\n"
+    "2. Clarity (based on mastery level)\n"
     "3. Example quality (useful worked example)\n"
-    "4. Depth (appropriate for learning)\n\n"
+    "4. Relevance to past mistakes\n"
+    "5. Depth (appropriate for difficulty)\n\n"
     "SCORING:\n"
     "- Each criterion: 0 to 1\n"
-    "- final_score = average of all 4\n\n"
+    "- final_score = average of all 5\n\n"
     "OUTPUT FORMAT (strict JSON only, no extra text):\n"
     '{{"correctness": float, "clarity": float, "example_quality": float, '
-    '"depth": float, "final_score": float, "issues": []}}'
+    '"relevance": float, "depth": float, "final_score": float, "issues": []}}'
 )
 
 QUESTION_JUDGE_PROMPT = (
@@ -122,17 +127,19 @@ QUESTION_JUDGE_PROMPT = (
     "INPUT:\n"
     "- Concept: {concept}\n"
     "- Difficulty: {difficulty}\n"
+    "- Explanation: {explanation}\n"
     "- Question: {question}\n\n"
     "TASK:\n"
-    "Score the question from 0 to 1 based on:\n"
+    "Evaluate the quality of the question.\n\n"
+    "Score (0–1):\n"
     "1. Relevance to concept\n"
-    "2. Difficulty match\n"
-    "3. Clarity (no ambiguity)\n"
-    "4. Non-triviality\n"
-    "5. Answerability\n\n"
+    "2. Alignment with explanation\n"
+    "3. Difficulty match\n"
+    "4. Clarity (no ambiguity)\n"
+    "5. Non-triviality\n\n"
     "OUTPUT FORMAT (strict JSON only, no extra text):\n"
-    '{{"relevance": float, "difficulty_match": float, "clarity": float, '
-    '"non_triviality": float, "answerability": float, "final_score": float}}'
+    '{{"relevance": float, "alignment": float, "difficulty_match": float, '
+    '"clarity": float, "non_triviality": float, "final_score": float}}'
 )
 
 
@@ -245,32 +252,54 @@ def score_explanation(explanation: str, concept: str) -> float:
 
 
 def _parse_json_response(text: str) -> dict:
-    """Strip markdown fences and parse JSON."""
+    """
+    Extract and parse the first complete JSON object from LLM output.
+
+    Uses { ... } boundaries instead of splitting on backticks, which breaks
+    when the model embeds ```code``` blocks inside JSON string values.
+    """
     text = text.strip()
-    if text.startswith("```"):
-        parts = text.split("```")
-        text = parts[1] if len(parts) > 1 else text
-        if text.startswith("json"):
-            text = text[4:]
-    return json.loads(text.strip())
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        return json.loads(text[start : end + 1])
+    return json.loads(text)
 
 
 def score_explanation_with_judge(
-    explanation: str, concept: str, client: Any
+    explanation: str,
+    concept: str,
+    client: Any,
+    mastery: float = 0.5,
+    past_wrong_questions: Optional[List[str]] = None,
+    difficulty: int = 1,
 ) -> Dict[str, Any]:
     """
     Call the judge model (ChatGPT) to score explanation quality.
 
-    Subscores: correctness, clarity, example_quality, depth (each 0–1).
-    final_score = average of all four.
+    Subscores: correctness, clarity, example_quality, relevance, depth (each 0–1).
+    final_score = average of all five.
 
     Falls back to keyword coverage if the API call fails.
 
     Returns:
-        Dict with keys: correctness, clarity, example_quality, depth,
-        final_score, issues.
+        Dict with keys: correctness, clarity, example_quality, relevance,
+        depth, final_score, issues.
     """
-    prompt = EXPLANATION_JUDGE_PROMPT.format(concept=concept, explanation=explanation)
+    difficulty_label = DIFFICULTY_LABELS.get(difficulty, "easy")
+    past_q_str = (
+        "; ".join(past_wrong_questions) if past_wrong_questions else "none"
+    )
+    # Escape braces in LLM-generated/user content to prevent str.format() misinterpretation
+    safe_explanation = explanation.replace("{", "{{").replace("}", "}}")
+    safe_past = past_q_str.replace("{", "{{").replace("}", "}}")
+    prompt = EXPLANATION_JUDGE_PROMPT.format(
+        concept=concept,
+        explanation=safe_explanation,
+        mastery=f"{mastery:.2f}",
+        past_wrong_questions=safe_past,
+        difficulty=difficulty_label,
+    )
     try:
         response = client.chat.completions.create(
             model="gpt-4o-mini",
@@ -286,30 +315,41 @@ def score_explanation_with_judge(
             "correctness": quality,
             "clarity": quality,
             "example_quality": quality,
+            "relevance": 0.5,
             "depth": quality,
-            "final_score": quality,
+            "final_score": (quality * 4 + 0.5) / 5,
             "issues": ["judge unavailable — keyword fallback used"],
         }
 
 
 def score_question_with_judge(
-    question: str, concept: str, difficulty: int, client: Any
+    question: str,
+    concept: str,
+    difficulty: int,
+    client: Any,
+    explanation: str = "",
 ) -> Dict[str, Any]:
     """
     Call the judge model (ChatGPT) to score question quality.
 
-    Subscores: relevance, difficulty_match, clarity, non_triviality,
-    answerability (each 0–1). final_score = average of all five.
+    Subscores: relevance, alignment, difficulty_match, clarity, non_triviality
+    (each 0–1). final_score = average of all five.
 
     Falls back to 0.5 across all subscores if the API call fails.
 
     Returns:
-        Dict with keys: relevance, difficulty_match, clarity, non_triviality,
-        answerability, final_score.
+        Dict with keys: relevance, alignment, difficulty_match, clarity,
+        non_triviality, final_score.
     """
     difficulty_label = DIFFICULTY_LABELS.get(difficulty, "easy")
+    # Escape braces in LLM-generated content to prevent str.format() misinterpretation
+    safe_explanation = explanation.replace("{", "{{").replace("}", "}}")
+    safe_question = question.replace("{", "{{").replace("}", "}}")
     prompt = QUESTION_JUDGE_PROMPT.format(
-        concept=concept, difficulty=difficulty_label, question=question
+        concept=concept,
+        difficulty=difficulty_label,
+        explanation=safe_explanation,
+        question=safe_question,
     )
     try:
         response = client.chat.completions.create(
@@ -323,9 +363,9 @@ def score_question_with_judge(
     except Exception:
         return {
             "relevance": 0.5,
+            "alignment": 0.5,
             "difficulty_match": 0.5,
             "clarity": 0.5,
             "non_triviality": 0.5,
-            "answerability": 0.5,
             "final_score": 0.5,
         }
