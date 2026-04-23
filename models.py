@@ -35,31 +35,27 @@ class TutorState(State):
     Internal state for the Adaptive Tutor environment.
 
     Tracks everything needed to manage a tutoring episode:
-    concept mastery, current question, and progress phase.
+    concept mastery, current teaching context, and episode history.
 
     Attributes (beyond inherited episode_id, step_count):
-        task: Active task name — drives difficulty and grader selection.
+        task: Active task name — drives difficulty selection.
         concept_mastery: Mastery score per concept, range [0.0, 1.0].
-        seen_question_ids: IDs of questions already presented this session.
         current_concept: Concept being practiced this episode.
-        current_difficulty: Difficulty level of the current question (1/2/3).
+        current_difficulty: Difficulty level (1/2/3).
         difficulty_label: Human-readable difficulty ("easy"/"medium"/"hard").
-        current_question_id: ID of the question the student got wrong.
-        prev_skill: Mastery before the agent's explanation.
-        prev_error: Wrong option the student chose on the initial attempt.
+        prev_skill: Mastery before the agent's teaching action.
+        history: List of step summary dicts for this session.
         phase: Current episode phase.
     """
 
     task: str = "concept_recall"
     concept_mastery: Dict[str, float] = {}
-    seen_question_ids: List[str] = []
     current_concept: str = ""
     current_difficulty: int = 1
     difficulty_label: str = "easy"
-    current_question_id: str = ""
     prev_skill: float = 0.0
-    prev_error: Optional[str] = None
-    phase: Literal["awaiting_explanation", "done"] = "awaiting_explanation"
+    history: List[Dict[str, Any]] = []
+    phase: Literal["awaiting_action", "done"] = "awaiting_action"
 
     model_config = {"extra": "allow", "validate_assignment": True}
 
@@ -70,12 +66,12 @@ class TutorState(State):
 
 
 class TutorAction(BaseModel):
-    """Agent action: submit an explanation and worked example for a concept."""
+    """Agent action: submit a question and explanation for a concept."""
 
     concept: str
     difficulty: Literal["easy", "medium", "hard"]
+    question: str
     explanation: str
-    worked_example: str
 
 
 class StudentProfile(BaseModel):
@@ -85,14 +81,15 @@ class StudentProfile(BaseModel):
 
 
 class MaterialFeedback(BaseModel):
-    """Result of scoring the agent's explanation against concept keywords."""
+    """Result of scoring the agent's explanation via the judge model."""
 
-    quality: float  # fraction of concept keywords covered, in [0.0, 1.0]
+    quality: float  # final_score in [0.0, 1.0]
     concept: str
+    subscores: Dict[str, float]
 
 
 class QuestionResult(BaseModel):
-    """Outcome of simulating the student on a follow-up question."""
+    """Outcome of simulating the student on the agent's question."""
 
     correct: bool
     difficulty: str  # "easy" | "medium" | "hard"

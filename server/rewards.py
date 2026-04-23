@@ -1,119 +1,60 @@
 """
-Reward functions for the Adaptive Tutor environment.
+Composite reward function for the Adaptive Tutor environment.
 
-Three graders matching the hackathon specification:
-- grade_easy:   rewards mastery improvement (concept_recall task)
-- grade_medium: rewards correctness + partial credit for different errors (application_practice)
-- grade_hard:   rewards mastery improvement plus difficulty bonus (advanced_analysis)
+The reward is a weighted combination of five signals:
+    w1 * mastery_gain       — learning progress
+    w2 * student_correct    — direct success signal
+    w3 * difficulty_bonus   — harder tasks rewarded more
+    w4 * explanation_quality — teaching quality (judge score)
+    w5 * question_quality   — assessment quality (judge score)
+
+Weights (sum to 1.0):
+    w1=0.4, w2=0.2, w3=0.1, w4=0.2, w5=0.1
+
+This unified formula replaces the previous task-specific graders
+(grade_easy / grade_medium / grade_hard), ensuring the agent is
+incentivised for genuine learning gain regardless of task type.
 """
-
-from typing import Optional
-
-from ..models import TASK_DIFFICULTY
 
 _EPS = 1e-6  # Scores must be strictly (0, 1), never exactly 0.0 or 1.0
 
+W1, W2, W3, W4, W5 = 0.4, 0.2, 0.1, 0.2, 0.1
 
-def grade_easy(prev_skill: float, new_skill: float) -> float:
-    """
-    Reward for concept_recall (difficulty 1) episodes.
-
-    Measures raw skill improvement. Gain of 0.5 → reward 1.0.
-
-    Args:
-        prev_skill: Mastery before the agent's explanation.
-        new_skill:  Mastery after the agent's explanation.
-
-    Returns:
-        Reward in [0.0, 1.0].
-    """
-    improvement = new_skill - prev_skill
-    return min(max(improvement * 2, 0.0), 1.0)
-
-
-def grade_medium(
-    prev_error: Optional[str],
-    new_error: Optional[str],
-    correct: bool,
-) -> float:
-    """
-    Reward for application_practice (difficulty 2) episodes.
-
-    Full reward for a correct follow-up answer; partial credit when the
-    student makes a different mistake (evidence of partial learning).
-
-    Args:
-        prev_error: Wrong option chosen on the initial attempt.
-        new_error:  Wrong option chosen on the follow-up (None if correct).
-        correct:    Whether the student answered the follow-up correctly.
-
-    Returns:
-        1.0 if correct, 0.5 if different mistake, 0.0 if same mistake.
-    """
-    if correct:
-        return 1.0
-    if prev_error != new_error:
-        return 0.5  # Different mistake → partial learning signal
-    return 0.0
-
-
-def grade_hard(
-    prev_skill: float,
-    new_skill: float,
-    difficulty_label: str,
-    correct: bool,
-) -> float:
-    """
-    Reward for advanced_analysis (difficulty 3) episodes.
-
-    Combines mastery improvement with a difficulty bonus when correct.
-
-    Args:
-        prev_skill:       Mastery before explanation.
-        new_skill:        Mastery after explanation.
-        difficulty_label: "easy", "medium", or "hard" — drives bonus size.
-        correct:          Whether the student answered the follow-up correctly.
-
-    Returns:
-        Reward in [0.0, 1.0].
-    """
-    base = new_skill - prev_skill
-    difficulty_bonus = {"easy": 0.2, "medium": 0.5, "hard": 1.0}[difficulty_label]
-    if correct:
-        return min(base + difficulty_bonus, 1.0)
-    return max(base, 0.0)
+# Bonus scales with difficulty so harder tasks earn proportionally more
+DIFFICULTY_BONUS = {1: 0.2, 2: 0.5, 3: 1.0}
 
 
 def compute_reward(
-    task: str,
     prev_skill: float,
     new_skill: float,
-    difficulty_label: str,
-    prev_error: Optional[str],
-    new_error: Optional[str],
     correct: bool,
+    difficulty: int,
+    explanation_quality: float,
+    question_quality: float,
 ) -> float:
     """
-    Dispatch to the appropriate grader based on the current task.
+    Compute the composite RL reward for a tutoring step.
 
     Args:
-        task:             Task name ("concept_recall", "application_practice",
-                          or "advanced_analysis").
-        prev_skill:       Mastery before explanation.
-        new_skill:        Mastery after explanation.
-        difficulty_label: Human-readable difficulty for grade_hard bonus.
-        prev_error:       Initial wrong answer option letter.
-        new_error:        Follow-up wrong answer option letter (None if correct).
-        correct:          Whether the follow-up answer was correct.
+        prev_skill:           Mastery before the agent's teaching action.
+        new_skill:            Mastery after updating with explanation quality.
+        correct:              Whether the simulated student answered correctly.
+        difficulty:           Difficulty level 1/2/3.
+        explanation_quality:  Judge score for the explanation in [0, 1].
+        question_quality:     Judge score for the question in [0, 1].
 
     Returns:
-        Reward in [0.0, 1.0].
+        Reward strictly in (1e-6, 1 - 1e-6).
     """
-    difficulty_int = TASK_DIFFICULTY.get(task, 1)
-    if difficulty_int == 1:
-        raw = grade_easy(prev_skill, new_skill)
-    elif difficulty_int == 2:
-        raw = grade_medium(prev_error, new_error, correct)
-    else:
-        raw = grade_hard(prev_skill, new_skill, difficulty_label, correct)
+    mastery_gain = max(0.0, new_skill - prev_skill)
+    correct_signal = 1.0 if correct else 0.0
+    diff_bonus = DIFFICULTY_BONUS.get(difficulty, 0.2)
+
+    raw = (
+        W1 * mastery_gain
+        + W2 * correct_signal
+        + W3 * diff_bonus
+        + W4 * explanation_quality
+        + W5 * question_quality
+    )
     return max(_EPS, min(1.0 - _EPS, raw))

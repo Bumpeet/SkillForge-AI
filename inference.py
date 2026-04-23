@@ -9,6 +9,8 @@ Required environment variables:
     API_BASE_URL      LLM endpoint  (default: https://router.huggingface.co/v1)
     MODEL_NAME        Model identifier (default: Qwen/Qwen2.5-72B-Instruct)
     HF_TOKEN          API key (also checked as API_KEY)
+    OPENAI_API_KEY    API key for the judge model (ChatGPT). Falls back to HF_TOKEN.
+    JUDGE_BASE_URL    Optional base URL for the judge model endpoint.
     LOCAL_IMAGE_NAME  Docker image name for from_docker_image() — optional
 
 Stdout format (mandatory per hackathon spec):
@@ -17,7 +19,7 @@ Stdout format (mandatory per hackathon spec):
     [END]   success=<true|false> steps=<n> score=<score> rewards=<r1,r2,...,rn>
 
 Example usage:
-    HF_TOKEN=hf_xxx python inference.py
+    HF_TOKEN=hf_xxx OPENAI_API_KEY=sk-xxx python inference.py
     LOCAL_IMAGE_NAME=adaptive-tutor:latest HF_TOKEN=hf_xxx python inference.py
 """
 
@@ -35,7 +37,7 @@ from typing import Any, Dict, List, Optional
 API_BASE_URL: str = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
 MODEL_NAME: str = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
 API_KEY: Optional[str] = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
-IMAGE_NAME: Optional[str] = os.getenv(" ")
+IMAGE_NAME: Optional[str] = os.getenv("LOCAL_IMAGE_NAME")
 
 TASKS: List[str] = ["concept_recall", "application_practice", "advanced_analysis"]
 SUCCESS_THRESHOLD: float = 0.3  # reward >= threshold → success
@@ -46,19 +48,30 @@ MAX_TOKENS: int = 800
 SYSTEM_PROMPT: str = textwrap.dedent("""
     You are an expert DSA (Data Structures and Algorithms) tutor.
 
-    A student has answered a multiple-choice question incorrectly.
-    Your task is to generate a clear, concise explanation of the correct concept
-    and one concrete worked example that illustrates it.
+    You will be given a student's current mastery level (0 to 1) and a target
+    difficulty (1=easy, 2=medium, 3=hard) for a specific DSA concept.
 
-    Focus on:
-    1. Why the student's answer was wrong.
-    2. Why the correct answer is right.
-    3. A brief worked example (code snippet or step-by-step trace).
+    Your task is to:
+    1. Generate ONE clear, targeted question for the concept at the given difficulty.
+    2. Generate a clear explanation that helps the student improve.
 
-    Respond with a JSON object only — no extra text:
+    GUIDELINES for the question:
+    - Easy (1): definitions and basic understanding
+    - Medium (2): application and problem solving
+    - Hard (3): trade-offs, optimisation, edge cases
+    - Make the question relevant, non-trivial, and clearly answerable
+
+    GUIDELINES for the explanation:
+    - mastery < 0.3  → very simple, intuitive, step-by-step with a worked example
+    - mastery 0.3–0.7 → balanced explanation with examples
+    - mastery > 0.7  → concise, focus on edge cases and reasoning
+
+    Respond with a JSON object ONLY — no extra text:
     {
-        "explanation": "<explanation text, under 300 words>",
-        "worked_example": "<worked example, under 200 words>"
+        "question": "<question text>",
+        "explanation": "<explanation text with worked example, under 400 words>",
+        "difficulty": <difficulty integer>,
+        "concept": "<concept name>"
     }
 """).strip()
 
@@ -97,28 +110,35 @@ def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> No
 
 
 # ---------------------------------------------------------------------------
-# LLM call
+# LLM call — agent generates question + explanation
 # ---------------------------------------------------------------------------
 
 
-def get_explanation(
+def get_teaching_action(
     client: Any,
-    question_context: Dict[str, Any],
+    state_context: Dict[str, Any],
 ) -> Dict[str, str]:
-    """Call the LLM to generate an explanation for the student's wrong answer."""
-    concept = question_context.get("concept", "")
-    question = question_context.get("question", "")
-    options = question_context.get("options", [])
-    student_answer = question_context.get("student_answer", "?")
-    difficulty = question_context.get("difficulty", "easy")
+    """
+    Call the agent LLM (Qwen) to generate a teaching question and explanation.
+
+    Conditions on:
+        - concept: DSA concept to teach
+        - mastery: student's current mastery in [0, 1]
+        - difficulty: target difficulty level (1/2/3)
+
+    Returns:
+        Dict with keys: "question", "explanation", "difficulty", "concept"
+    """
+    concept = state_context.get("concept", "")
+    mastery = state_context.get("mastery", 0.5)
+    difficulty = state_context.get("difficulty", 1)
+    difficulty_label = state_context.get("difficulty_label", "easy")
 
     user_prompt = (
         f"Concept: {concept}\n"
-        f"Difficulty: {difficulty}\n"
-        f"Question: {question}\n"
-        f"Options:\n" + "\n".join(f"  {o}" for o in options) + "\n"
-        f"Student answered: {student_answer}\n\n"
-        f"Generate the explanation and worked example JSON."
+        f"Student mastery: {mastery:.2f} (0 to 1)\n"
+        f"Target difficulty: {difficulty} ({difficulty_label})\n\n"
+        f"Generate the teaching question and explanation JSON."
     )
 
     try:
@@ -140,10 +160,19 @@ def get_explanation(
         return json.loads(text)
     except Exception as exc:
         print(f"[DEBUG] LLM call failed: {exc}", flush=True)
-        # Fallback: return a generic explanation so the episode can complete
+        # Fallback: return generic content so the episode can complete
         return {
-            "explanation": f"The correct approach for {concept} involves understanding the core concept carefully.",
-            "worked_example": "Consider the simplest example and build from there.",
+            "question": (
+                f"What is the key principle behind {concept} "
+                f"at difficulty level {difficulty}?"
+            ),
+            "explanation": (
+                f"The concept of {concept} involves understanding its core principles. "
+                f"At difficulty {difficulty_label}, you should focus on applying these "
+                f"principles to solve problems step by step."
+            ),
+            "difficulty": difficulty,
+            "concept": concept,
         }
 
 
@@ -175,39 +204,40 @@ async def run_task(task: str, client: Any, env_factory) -> None:
         rewards.append(0.0)
         steps_taken = 1
 
-        # --- Step 2: get current question context ---
-        q_obs = await env.step(
-            {"type": "call_tool", "tool_name": "get_current_question", "arguments": {}}
+        # --- Step 2: get current state ---
+        state_obs = await env.step(
+            {"type": "call_tool", "tool_name": "get_state", "arguments": {}}
         )
-        q_meta = {}
-        if hasattr(q_obs, "result") and q_obs.result is not None:
-            # CallToolResult.data holds the dict; fall back to parsing content text
-            if hasattr(q_obs.result, "data") and isinstance(q_obs.result.data, dict):
-                q_meta = q_obs.result.data
-            elif isinstance(q_obs.result, dict):
-                q_meta = q_obs.result
-        if not q_meta and hasattr(q_obs, "metadata"):
-            q_meta = q_obs.metadata.get("result", reset_meta)
-        log_step(2, "get_current_question", 0.0, False, None)
+        state_meta: Dict[str, Any] = {}
+        if hasattr(state_obs, "result") and state_obs.result is not None:
+            if hasattr(state_obs.result, "data") and isinstance(state_obs.result.data, dict):
+                state_meta = state_obs.result.data
+            elif isinstance(state_obs.result, dict):
+                state_meta = state_obs.result
+        if not state_meta and hasattr(state_obs, "metadata"):
+            state_meta = state_obs.metadata.get("result", reset_meta)
+
+        log_step(2, "get_state", 0.0, False, None)
         rewards.append(0.0)
         steps_taken = 2
 
         # Use fallback from reset metadata if tool result is empty
-        context = q_meta if q_meta else reset_meta
+        context = state_meta if state_meta else reset_meta
 
-        # --- Step 3: LLM generates and submits explanation ---
-        parsed = get_explanation(client, context)
+        # --- Step 3: agent generates and submits teaching action ---
+        parsed = get_teaching_action(client, context)
+        question = parsed.get("question", "")
         explanation = parsed.get("explanation", "")
-        worked_example = parsed.get("worked_example", "")
-        action_str = f"submit_explanation(concept={context.get('concept','?')},len={len(explanation)})"
+        concept = context.get("concept", parsed.get("concept", "?"))
+        action_str = f"submit_teaching_action(concept={concept},q_len={len(question)},e_len={len(explanation)})"
 
         final_obs = await env.step(
             {
                 "type": "call_tool",
-                "tool_name": "submit_explanation",
+                "tool_name": "submit_teaching_action",
                 "arguments": {
+                    "question": question,
                     "explanation": explanation,
-                    "worked_example": worked_example,
                 },
             }
         )
@@ -223,7 +253,6 @@ async def run_task(task: str, client: Any, env_factory) -> None:
 
     except Exception as exc:
         print(f"[DEBUG] Episode error: {exc}", flush=True)
-        # Ensure we still emit [END]
         if not rewards:
             rewards = [_EPS]
         score = _EPS

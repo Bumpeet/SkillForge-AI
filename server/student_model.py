@@ -3,20 +3,25 @@ Simulated student model for the Adaptive Tutor environment.
 
 The student model provides:
 - Default concept mastery levels for a new student
-- Concept keyword dictionaries used to score explanation quality
-- Functions for question selection, student simulation, and mastery updates
+- Sigmoid-based student simulation with guess and slip probabilities
+- Differentiated mastery update (α when correct, β when incorrect)
+- ChatGPT judge callers for explanation and question quality scoring
+- Keyword fallback for when the judge API is unavailable
 """
 
 import json
 import os
-from math import ceil
+from math import ceil, exp
 from random import Random
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from ..models import DIFFICULTY_LABELS, TASK_DIFFICULTY, Question
 
 
-# Default starting mastery for a new student (weak in dp / backtracking / trees)
+# ---------------------------------------------------------------------------
+# Default mastery levels
+# ---------------------------------------------------------------------------
+
 DEFAULT_MASTERY: Dict[str, float] = {
     "arrays": 0.8,
     "stack": 0.5,
@@ -25,7 +30,10 @@ DEFAULT_MASTERY: Dict[str, float] = {
     "dp": 0.1,
 }
 
-# Keywords per concept used to score explanation quality
+# ---------------------------------------------------------------------------
+# Concept keywords — used as fallback for explanation quality scoring
+# ---------------------------------------------------------------------------
+
 CONCEPT_KEYWORDS: Dict[str, List[str]] = {
     "dp": [
         "memoization",
@@ -70,6 +78,68 @@ CONCEPT_KEYWORDS: Dict[str, List[str]] = {
     ],
 }
 
+# ---------------------------------------------------------------------------
+# Student simulation constants
+# ---------------------------------------------------------------------------
+
+TEMPERATURE: float = 0.3
+GUESS_PROB: float = 0.10
+SLIP_PROB: float = 0.05
+DIFFICULTY_BIAS: Dict[int, float] = {1: 0.3, 2: 0.5, 3: 0.7}
+
+# ---------------------------------------------------------------------------
+# Mastery update constants
+# ---------------------------------------------------------------------------
+
+ALPHA: float = 0.3   # learning rate when student answers correctly
+BETA: float = 0.1    # learning rate when student answers incorrectly (β < α)
+
+# ---------------------------------------------------------------------------
+# Judge prompts
+# ---------------------------------------------------------------------------
+
+EXPLANATION_JUDGE_PROMPT = (
+    "You are an expert evaluator of teaching quality.\n"
+    "INPUT:\n"
+    "- Concept: {concept}\n"
+    "- Explanation: {explanation}\n\n"
+    "TASK:\n"
+    "Score the explanation from 0 to 1 based on:\n"
+    "1. Correctness (technical accuracy)\n"
+    "2. Clarity (easy to understand)\n"
+    "3. Example quality (useful worked example)\n"
+    "4. Depth (appropriate for learning)\n\n"
+    "SCORING:\n"
+    "- Each criterion: 0 to 1\n"
+    "- final_score = average of all 4\n\n"
+    "OUTPUT FORMAT (strict JSON only, no extra text):\n"
+    '{{"correctness": float, "clarity": float, "example_quality": float, '
+    '"depth": float, "final_score": float, "issues": []}}'
+)
+
+QUESTION_JUDGE_PROMPT = (
+    "You are an expert evaluator of assessment quality.\n"
+    "INPUT:\n"
+    "- Concept: {concept}\n"
+    "- Difficulty: {difficulty}\n"
+    "- Question: {question}\n\n"
+    "TASK:\n"
+    "Score the question from 0 to 1 based on:\n"
+    "1. Relevance to concept\n"
+    "2. Difficulty match\n"
+    "3. Clarity (no ambiguity)\n"
+    "4. Non-triviality\n"
+    "5. Answerability\n\n"
+    "OUTPUT FORMAT (strict JSON only, no extra text):\n"
+    '{{"relevance": float, "difficulty_match": float, "clarity": float, '
+    '"non_triviality": float, "answerability": float, "final_score": float}}'
+)
+
+
+# ---------------------------------------------------------------------------
+# Question bank utilities (kept for reference; not used for agent actions)
+# ---------------------------------------------------------------------------
+
 
 def load_questions(data_dir: Optional[str] = None) -> List[Question]:
     """Load all questions from questions.json."""
@@ -101,91 +171,161 @@ def mastery_to_difficulty(mastery: float) -> int:
     return max(1, min(3, ceil(mastery * 3)))
 
 
-def pick_question(
-    concept: str,
-    difficulty: int,
-    seen_ids: List[str],
-    questions: List[Question],
-    rng: Random,
-) -> Optional[Question]:
-    """
-    Pick a question for the given concept and difficulty not yet seen.
-
-    Falls back to adjacent difficulties if no unseen question exists at the
-    requested level. Returns None only when every question for the concept has
-    been seen.
-    """
-    seen = set(seen_ids)
-    for d in _difficulty_fallback_order(difficulty):
-        candidates = [
-            q
-            for q in questions
-            if q.concept == concept and q.difficulty == d and q.id not in seen
-        ]
-        if candidates:
-            return rng.choice(candidates)
-    return None
+# ---------------------------------------------------------------------------
+# Core student simulation
+# ---------------------------------------------------------------------------
 
 
-def _difficulty_fallback_order(difficulty: int) -> List[int]:
-    """Return difficulty levels to try, starting with the requested one."""
-    if difficulty == 1:
-        return [1, 2, 3]
-    elif difficulty == 2:
-        return [2, 1, 3]
-    else:
-        return [3, 2, 1]
-
-
-def get_wrong_options(options: List[str], answer: str) -> List[str]:
-    """Return option letters that are not the correct answer."""
-    return [opt[0] for opt in options if not opt.startswith(answer)]
-
-
-def simulate_student(
-    mastery: float,
-    difficulty: int,
-    options: List[str],
-    answer: str,
-    rng: Random,
-) -> Tuple[bool, str]:
+def simulate_student(mastery: float, difficulty: int, rng: Random) -> bool:
     """
     Simulate a student attempting a question.
 
-    P(correct) = mastery / difficulty, clamped to [0, 1].
-    If incorrect, picks uniformly from wrong options.
+    P(correct) = sigmoid((mastery - difficulty_bias) / temperature)
+                 + guess_prob - slip_prob
+
+    Higher mastery or lower difficulty → higher probability of success.
+    guess_prob adds a floor; slip_prob caps the ceiling.
 
     Returns:
-        (is_correct, chosen_option_letter)
+        True if the simulated student answers correctly.
     """
-    p_correct = min(1.0, max(0.0, mastery / difficulty))
-    if rng.random() < p_correct:
-        return True, answer
-    wrong = get_wrong_options(options, answer)
-    chosen = rng.choice(wrong) if wrong else answer
-    return False, chosen
+    bias = DIFFICULTY_BIAS[difficulty]
+    p = 1.0 / (1.0 + exp(-(mastery - bias) / TEMPERATURE))
+    p = min(1.0, max(0.0, p + GUESS_PROB - SLIP_PROB))
+    return rng.random() < p
 
 
-def score_explanation(explanation: str, worked_example: str, concept: str) -> float:
+# ---------------------------------------------------------------------------
+# Mastery update
+# ---------------------------------------------------------------------------
+
+
+def update_mastery(old_mastery: float, quality: float, correct: bool) -> float:
     """
-    Score explanation quality by keyword coverage.
+    Update mastery after seeing an explanation.
 
-    Counts how many concept keywords appear in the combined explanation +
-    worked example text (case-insensitive). Returns fraction in [0.0, 1.0].
+    Uses a higher learning rate (ALPHA) when the student answered correctly,
+    and a lower rate (BETA) when incorrect, reflecting that correct responses
+    confirm actual learning while incorrect responses suggest partial learning.
+
+    Args:
+        old_mastery: Mastery before the explanation.
+        quality:     Explanation quality score in [0.0, 1.0].
+        correct:     Whether the simulated student answered correctly.
+
+    Returns:
+        Updated mastery clamped to [0.0, 1.0].
+    """
+    rate = ALPHA if correct else BETA
+    return min(1.0, old_mastery + rate * quality)
+
+
+# ---------------------------------------------------------------------------
+# Explanation quality scoring (keyword fallback)
+# ---------------------------------------------------------------------------
+
+
+def score_explanation(explanation: str, concept: str) -> float:
+    """
+    Score explanation quality by keyword coverage (fallback).
+
+    Returns fraction of concept keywords found in the explanation text.
     """
     keywords = CONCEPT_KEYWORDS.get(concept, [])
     if not keywords:
         return 0.5
-    combined = (explanation + " " + worked_example).lower()
+    combined = explanation.lower()
     covered = sum(1 for kw in keywords if kw.lower() in combined)
     return covered / len(keywords)
 
 
-def update_mastery(old_mastery: float, quality: float) -> float:
-    """
-    Update mastery after seeing an explanation.
+# ---------------------------------------------------------------------------
+# ChatGPT judge callers
+# ---------------------------------------------------------------------------
 
-    Max improvement per explanation is 0.2 × quality_score.
-    Mastery is clamped to [0.0, 1.0].
+
+def _parse_json_response(text: str) -> dict:
+    """Strip markdown fences and parse JSON."""
+    text = text.strip()
+    if text.startswith("```"):
+        parts = text.split("```")
+        text = parts[1] if len(parts) > 1 else text
+        if text.startswith("json"):
+            text = text[4:]
+    return json.loads(text.strip())
+
+
+def score_explanation_with_judge(
+    explanation: str, concept: str, client: Any
+) -> Dict[str, Any]:
     """
-    return min(1.0, old_mastery + 0.2 * quality)
+    Call the judge model (ChatGPT) to score explanation quality.
+
+    Subscores: correctness, clarity, example_quality, depth (each 0–1).
+    final_score = average of all four.
+
+    Falls back to keyword coverage if the API call fails.
+
+    Returns:
+        Dict with keys: correctness, clarity, example_quality, depth,
+        final_score, issues.
+    """
+    prompt = EXPLANATION_JUDGE_PROMPT.format(concept=concept, explanation=explanation)
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.0,
+            max_tokens=300,
+        )
+        text = response.choices[0].message.content or ""
+        return _parse_json_response(text)
+    except Exception:
+        quality = score_explanation(explanation, concept)
+        return {
+            "correctness": quality,
+            "clarity": quality,
+            "example_quality": quality,
+            "depth": quality,
+            "final_score": quality,
+            "issues": ["judge unavailable — keyword fallback used"],
+        }
+
+
+def score_question_with_judge(
+    question: str, concept: str, difficulty: int, client: Any
+) -> Dict[str, Any]:
+    """
+    Call the judge model (ChatGPT) to score question quality.
+
+    Subscores: relevance, difficulty_match, clarity, non_triviality,
+    answerability (each 0–1). final_score = average of all five.
+
+    Falls back to 0.5 across all subscores if the API call fails.
+
+    Returns:
+        Dict with keys: relevance, difficulty_match, clarity, non_triviality,
+        answerability, final_score.
+    """
+    difficulty_label = DIFFICULTY_LABELS.get(difficulty, "easy")
+    prompt = QUESTION_JUDGE_PROMPT.format(
+        concept=concept, difficulty=difficulty_label, question=question
+    )
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.0,
+            max_tokens=200,
+        )
+        text = response.choices[0].message.content or ""
+        return _parse_json_response(text)
+    except Exception:
+        return {
+            "relevance": 0.5,
+            "difficulty_match": 0.5,
+            "clarity": 0.5,
+            "non_triviality": 0.5,
+            "answerability": 0.5,
+            "final_score": 0.5,
+        }

@@ -1,26 +1,28 @@
 """
 Adaptive Tutor Environment Implementation.
 
-An RL environment where the agent is an LLM that generates explanations for
-weak DSA concepts. The environment:
-  1. Identifies the student's weakest concept (lowest mastery score).
-  2. Presents an MCQ question the simulated student got wrong.
-  3. Waits for the agent to submit an explanation + worked example.
-  4. Simulates the student on a follow-up question to measure improvement.
-  5. Returns a reward using the hackathon-specified graders.
+An RL environment where the agent is an LLM that generates a teaching question
+AND explanation conditioned on the student's current mastery and difficulty.
 
-Three tasks (selected via reset(task=...)):
-  - concept_recall        (difficulty 1): graded by grade_easy
-  - application_practice  (difficulty 2): graded by grade_medium
-  - advanced_analysis     (difficulty 3): graded by grade_hard
+Episode flow:
+  1. reset()  → returns state {concept, mastery, difficulty, history}
+  2. Agent calls get_state() to inspect current state.
+  3. Agent calls submit_teaching_action(question, explanation).
+  4. Environment:
+       a. Scores explanation quality via ChatGPT judge.
+       b. Scores question quality via ChatGPT judge.
+       c. Simulates student: P(correct) = sigmoid formula.
+       d. Updates mastery: α*quality if correct, β*quality if not.
+       e. Computes composite reward.
+  5. Returns done=True Observation with reward + full metadata.
 
 MCP tools exposed to the agent:
-  - get_mastery_state()          → mastery levels + weakest concept
-  - get_current_question()       → question text, options, student's wrong answer
-  - submit_explanation(...)      → scores explanation, simulates follow-up, returns reward
+  - get_state()                         → concept, mastery, difficulty, history
+  - submit_teaching_action(question, explanation)  → triggers evaluation
 """
 
 import logging
+import os
 from random import Random
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
@@ -34,17 +36,15 @@ from ..models import (
     DIFFICULTY_LABELS,
     TASK_DIFFICULTY,
     TASKS,
-    Question,
     TutorState,
 )
 from .rewards import _EPS, compute_reward
 from .student_model import (
     DEFAULT_MASTERY,
-    load_questions,
     mastery_to_difficulty,
-    pick_question,
     pick_weakest_concept,
-    score_explanation,
+    score_explanation_with_judge,
+    score_question_with_judge,
     simulate_student,
     update_mastery,
 )
@@ -52,14 +52,31 @@ from .student_model import (
 logger = logging.getLogger(__name__)
 
 
+def _make_judge_client():
+    """Create an OpenAI client for the judge model, or return None if unavailable."""
+    api_key = os.getenv("OPENAI_API_KEY") or os.getenv("HF_TOKEN")
+    judge_base_url = os.getenv("JUDGE_BASE_URL")
+    if not api_key:
+        return None
+    try:
+        from openai import OpenAI
+
+        kwargs: Dict[str, Any] = {"api_key": api_key}
+        if judge_base_url:
+            kwargs["base_url"] = judge_base_url
+        return OpenAI(**kwargs)
+    except Exception:
+        return None
+
+
 class AdaptiveTutorEnvironment(MCPEnvironment):
     """
     Adaptive DSA tutor environment for RL training.
 
     Each episode:
-      - reset() selects the weakest concept, picks an MCQ the student fails.
-      - submit_explanation() tool scores the agent's response and runs a follow-up.
-      - Reward is returned at done=True with the episode result.
+      - reset() selects the weakest concept and sets difficulty from mastery.
+      - submit_teaching_action() tool triggers judge scoring, student simulation,
+        mastery update, and reward computation.
 
     Supports concurrent sessions (each instance is independent).
     """
@@ -67,71 +84,58 @@ class AdaptiveTutorEnvironment(MCPEnvironment):
     SUPPORTS_CONCURRENT_SESSIONS = True
 
     def __init__(self, data_dir: Optional[str] = None) -> None:
-        self._questions: List[Question] = load_questions(data_dir)
         self._rng: Random = Random()
+        self._judge_client = _make_judge_client()
 
         mcp = FastMCP("adaptive_tutor")
-
-        # Keep reference to self for closures
         env = self
 
         @mcp.tool
-        def get_mastery_state() -> Dict[str, Any]:
+        def get_state() -> Dict[str, Any]:
             """
-            Return the student's current concept mastery levels.
+            Return the current tutoring state.
 
             Returns a dict with:
-              - mastery: mapping of concept → score in [0.0, 1.0]
-              - weakest_concept: concept with the lowest mastery score
+              - concept: DSA concept to teach this episode
+              - mastery: student's current mastery score in [0.0, 1.0]
+              - difficulty: target difficulty level (1=easy, 2=medium, 3=hard)
+              - difficulty_label: human-readable difficulty string
+              - history: list of past step summaries in this session
             """
-            return {
-                "mastery": dict(env._state.concept_mastery),
-                "weakest_concept": pick_weakest_concept(env._state.concept_mastery),
-            }
-
-        @mcp.tool
-        def get_current_question() -> Dict[str, Any]:
-            """
-            Return the question the student got wrong along with their wrong answer.
-
-            Returns a dict with:
-              - concept: the DSA concept being tested
-              - difficulty: "easy", "medium", or "hard"
-              - task: active task name
-              - question: the question text
-              - options: list of MCQ options
-              - student_answer: the wrong option the student chose
-            """
-            q = env._get_question(env._state.current_question_id)
             return {
                 "concept": env._state.current_concept,
-                "difficulty": env._state.difficulty_label,
-                "task": env._state.task,
-                "question": q.question if q else "",
-                "options": q.options if q else [],
-                "student_answer": env._state.prev_error,
+                "mastery": env._state.prev_skill,
+                "difficulty": env._state.current_difficulty,
+                "difficulty_label": env._state.difficulty_label,
+                "history": list(env._state.history),
             }
 
         @mcp.tool
-        def submit_explanation(explanation: str, worked_example: str) -> Dict[str, Any]:
+        def submit_teaching_action(question: str, explanation: str) -> Dict[str, Any]:
             """
-            Submit an explanation and worked example for the student's wrong answer.
+            Submit a teaching question and explanation for the student.
+
+            The agent should generate:
+              - question: A question appropriate for the concept and difficulty.
+              - explanation: A clear explanation that helps the student understand
+                            the concept, adapted to their mastery level.
 
             The environment will:
-              1. Score the explanation quality by keyword coverage.
-              2. Update the student's mastery accordingly.
-              3. Simulate the student on a follow-up question.
-              4. Compute and return the episode reward.
+              1. Score explanation quality via a judge model.
+              2. Score question quality via a judge model.
+              3. Simulate the student's response (sigmoid probability model).
+              4. Update the student's mastery.
+              5. Compute and return the composite reward.
 
             Args:
-                explanation:    Text explaining the correct concept.
-                worked_example: A concrete worked example illustrating the concept.
+                question:    Agent-generated question for the student.
+                explanation: Agent-generated explanation of the concept.
 
             Returns:
-                dict with status, concept, and a confirmation message.
+                dict with status and confirmation message.
                 The reward and episode result are on the Observation returned by step().
             """
-            if env._state.phase != "awaiting_explanation":
+            if env._state.phase != "awaiting_action":
                 return {
                     "status": "error",
                     "message": "No active episode or episode already completed.",
@@ -139,11 +143,11 @@ class AdaptiveTutorEnvironment(MCPEnvironment):
             return {
                 "status": "received",
                 "concept": env._state.current_concept,
-                "message": "Explanation received. Evaluating student follow-up.",
+                "message": "Teaching action received. Evaluating with judge and simulating student.",
             }
 
         super().__init__(mcp)
-        # Initialize with phase="done" so submit_explanation is rejected before first reset()
+        # Initialize with phase="done" so submit_teaching_action is rejected before reset()
         self._state = TutorState(phase="done")
 
     # ------------------------------------------------------------------
@@ -164,13 +168,13 @@ class AdaptiveTutorEnvironment(MCPEnvironment):
         Args:
             seed:            Random seed for reproducibility.
             episode_id:      Optional episode identifier.
-            task:            Task name — selects difficulty and grader.
+            task:            Task name — drives difficulty selection.
                              One of: "concept_recall", "application_practice",
                              "advanced_analysis".
             concept_mastery: Initial mastery dict. Defaults to DEFAULT_MASTERY.
 
         Returns:
-            Observation with the question the student got wrong.
+            Observation with the current state for the agent to condition on.
         """
         if task not in TASKS:
             task = "concept_recall"
@@ -182,45 +186,28 @@ class AdaptiveTutorEnvironment(MCPEnvironment):
         difficulty = TASK_DIFFICULTY[task]
         difficulty_label = DIFFICULTY_LABELS[difficulty]
 
-        # Pick weakest concept and a question the student will likely fail
         concept = pick_weakest_concept(mastery)
-        seen: List[str] = []
-
-        question = pick_question(concept, difficulty, seen, self._questions, self._rng)
-        if question is None:
-            # Fallback: pick any unseen question for this concept
-            question = pick_question(concept, 1, seen, self._questions, self._rng)
-
-        # Simulate initial student attempt (likely wrong for weak concepts)
         prev_skill = mastery.get(concept, 0.1)
-        is_correct, chosen = simulate_student(
-            prev_skill, difficulty, question.options, question.answer, self._rng
-        )
-
-        # If student got it right, still proceed — the agent explains anyway
-        prev_error = None if is_correct else chosen
 
         self._state = TutorState(
             episode_id=episode_id or str(uuid4()),
             step_count=0,
             task=task,
             concept_mastery=mastery,
-            seen_question_ids=[question.id],
             current_concept=concept,
             current_difficulty=difficulty,
             difficulty_label=difficulty_label,
-            current_question_id=question.id,
             prev_skill=prev_skill,
-            prev_error=prev_error,
-            phase="awaiting_explanation",
+            history=[],
+            phase="awaiting_action",
         )
 
         logger.info(
-            "Reset: task=%s concept=%s difficulty=%s question=%s",
+            "Reset: task=%s concept=%s difficulty=%s mastery=%.2f",
             task,
             concept,
             difficulty_label,
-            question.id,
+            prev_skill,
         )
 
         return Observation(
@@ -229,12 +216,11 @@ class AdaptiveTutorEnvironment(MCPEnvironment):
             metadata={
                 "task": task,
                 "concept": concept,
-                "difficulty": difficulty_label,
-                "mastery_state": mastery,
-                "question": question.question,
-                "options": question.options,
-                "student_answer": prev_error,
-                "phase": "awaiting_explanation",
+                "mastery": prev_skill,
+                "difficulty": difficulty,
+                "difficulty_label": difficulty_label,
+                "history": [],
+                "phase": "awaiting_action",
             },
         )
 
@@ -253,12 +239,12 @@ class AdaptiveTutorEnvironment(MCPEnvironment):
 
         if (
             isinstance(action, CallToolAction)
-            and action.tool_name == "submit_explanation"
-            and self._state.phase == "awaiting_explanation"
+            and action.tool_name == "submit_teaching_action"
+            and self._state.phase == "awaiting_action"
         ):
+            question = action.arguments.get("question", "")
             explanation = action.arguments.get("explanation", "")
-            worked_example = action.arguments.get("worked_example", "")
-            return self._evaluate_explanation(explanation, worked_example, obs)
+            return self._evaluate_teaching_action(question, explanation, obs)
 
         return obs
 
@@ -273,12 +259,12 @@ class AdaptiveTutorEnvironment(MCPEnvironment):
 
         if (
             isinstance(action, CallToolAction)
-            and action.tool_name == "submit_explanation"
-            and self._state.phase == "awaiting_explanation"
+            and action.tool_name == "submit_teaching_action"
+            and self._state.phase == "awaiting_action"
         ):
+            question = action.arguments.get("question", "")
             explanation = action.arguments.get("explanation", "")
-            worked_example = action.arguments.get("worked_example", "")
-            return self._evaluate_explanation(explanation, worked_example, obs)
+            return self._evaluate_teaching_action(question, explanation, obs)
 
         return obs
 
@@ -303,70 +289,78 @@ class AdaptiveTutorEnvironment(MCPEnvironment):
     # Core evaluation logic
     # ------------------------------------------------------------------
 
-    def _evaluate_explanation(
-        self, explanation: str, worked_example: str, base_obs: Observation
+    def _evaluate_teaching_action(
+        self, question: str, explanation: str, base_obs: Observation
     ) -> Observation:
         """
-        Score the agent's explanation and simulate the student's follow-up.
+        Evaluate the agent's teaching action end-to-end.
 
-        1. Score explanation quality by keyword coverage.
-        2. Update the student's mastery.
-        3. Pick a follow-up question (same concept, same difficulty, not seen).
-        4. Simulate student on follow-up.
-        5. Compute reward via the appropriate grader.
-        6. Update state and return done=True observation.
+        1. Score explanation quality via the judge model (or keyword fallback).
+        2. Score question quality via the judge model (or heuristic fallback).
+        3. Simulate student: P(correct) = sigmoid((mastery-bias)/temp)+guess-slip
+        4. Update mastery: α*quality if correct, β*quality if not.
+        5. Compute composite reward.
+        6. Append step summary to history.
+        7. Return done=True Observation with full metadata.
         """
         concept = self._state.current_concept
         difficulty = self._state.current_difficulty
         difficulty_label = self._state.difficulty_label
         prev_skill = self._state.prev_skill
-        prev_error = self._state.prev_error
 
-        # Score explanation quality
-        quality = score_explanation(explanation, worked_example, concept)
-        new_skill = update_mastery(prev_skill, quality)
-
-        # Pick follow-up question
-        followup = pick_question(
-            concept,
-            difficulty,
-            self._state.seen_question_ids,
-            self._questions,
-            self._rng,
+        # 1. Score explanation quality
+        explanation_scores = score_explanation_with_judge(
+            explanation, concept, self._judge_client
         )
-        if followup is None:
-            # No unseen follow-up — use a conceptually equivalent question
-            followup = self._get_question(self._state.current_question_id)
+        explanation_quality = float(explanation_scores.get("final_score", 0.5))
 
-        # Simulate student on follow-up with updated mastery
-        correct, followup_chosen = simulate_student(
-            new_skill, difficulty, followup.options, followup.answer, self._rng
+        # 2. Score question quality
+        question_scores = score_question_with_judge(
+            question, concept, difficulty, self._judge_client
         )
-        new_error = None if correct else followup_chosen
+        question_quality = float(question_scores.get("final_score", 0.5))
 
-        # Compute reward
+        # 3. Simulate student
+        correct = simulate_student(prev_skill, difficulty, self._rng)
+
+        # 4. Update mastery
+        new_skill = update_mastery(prev_skill, explanation_quality, correct)
+
+        # 5. Compute composite reward
         reward = compute_reward(
-            task=self._state.task,
             prev_skill=prev_skill,
             new_skill=new_skill,
-            difficulty_label=difficulty_label,
-            prev_error=prev_error,
-            new_error=new_error,
             correct=correct,
+            difficulty=difficulty,
+            explanation_quality=explanation_quality,
+            question_quality=question_quality,
         )
+
+        # 6. Record history entry
+        step_summary = {
+            "step": self._state.step_count,
+            "concept": concept,
+            "difficulty": difficulty_label,
+            "explanation_quality": round(explanation_quality, 4),
+            "question_quality": round(question_quality, 4),
+            "correct": correct,
+            "mastery_before": round(prev_skill, 4),
+            "mastery_after": round(new_skill, 4),
+            "reward": round(reward, 4),
+        }
+        self._state.history.append(step_summary)
 
         # Update state
         self._state.concept_mastery[concept] = new_skill
-        if followup and followup.id != self._state.current_question_id:
-            self._state.seen_question_ids.append(followup.id)
         self._state.phase = "done"
 
         logger.info(
-            "Episode %s done: concept=%s quality=%.2f prev_skill=%.2f "
-            "new_skill=%.2f correct=%s reward=%.2f",
+            "Episode %s done: concept=%s expl_quality=%.2f q_quality=%.2f "
+            "prev_skill=%.2f new_skill=%.2f correct=%s reward=%.4f",
             self._state.episode_id,
             concept,
-            quality,
+            explanation_quality,
+            question_quality,
             prev_skill,
             new_skill,
             correct,
@@ -381,13 +375,28 @@ class AdaptiveTutorEnvironment(MCPEnvironment):
                 "task": self._state.task,
                 "concept": concept,
                 "difficulty": difficulty_label,
-                "explanation_quality": quality,
-                "prev_skill": prev_skill,
-                "new_skill": new_skill,
-                "follow_up_question": followup.question if followup else "",
-                "follow_up_options": followup.options if followup else [],
+                "explanation_quality": explanation_quality,
+                "explanation_subscores": {
+                    k: explanation_scores.get(k)
+                    for k in ("correctness", "clarity", "example_quality", "depth")
+                },
+                "explanation_issues": explanation_scores.get("issues", []),
+                "question_quality": question_quality,
+                "question_subscores": {
+                    k: question_scores.get(k)
+                    for k in (
+                        "relevance",
+                        "difficulty_match",
+                        "clarity",
+                        "non_triviality",
+                        "answerability",
+                    )
+                },
                 "student_correct": correct,
+                "mastery_before": prev_skill,
+                "mastery_after": new_skill,
                 "updated_mastery": dict(self._state.concept_mastery),
+                "history": list(self._state.history),
                 "phase": "done",
             },
         )
@@ -395,13 +404,6 @@ class AdaptiveTutorEnvironment(MCPEnvironment):
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
-
-    def _get_question(self, question_id: str) -> Optional[Question]:
-        """Look up a question by ID."""
-        for q in self._questions:
-            if q.id == question_id:
-                return q
-        return None
 
     @property
     def state(self) -> TutorState:

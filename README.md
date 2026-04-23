@@ -16,7 +16,7 @@ tags:
 
 # Adaptive Tutor Environment
 
-An RL environment where an LLM agent acts as a personalized DSA (Data Structures & Algorithms) tutor. The agent generates targeted explanations for concepts a simulated student is struggling with, and is rewarded when the student improves on a follow-up question.
+An RL environment where an LLM agent acts as a personalized DSA (Data Structures & Algorithms) tutor. The agent generates a targeted **question + explanation** conditioned on the student's mastery and difficulty, evaluated by a judge model (ChatGPT), with reward driven by measurable student learning gain.
 
 **Hackathon**: Meta x Hugging Face OpenEnv Challenge
 
@@ -25,12 +25,39 @@ An RL environment where an LLM agent acts as a personalized DSA (Data Structures
 The environment tracks per-concept mastery for a simulated student across 5 DSA concepts. Each episode:
 
 1. Identifies the student's **weakest concept** (lowest mastery score)
-2. Presents an MCQ the student answered **incorrectly**
-3. Waits for the agent to submit an **explanation + worked example**
-4. Simulates the student on a **follow-up question** to measure improvement
-5. Returns a **reward** proportional to learning gain
+2. Sets **difficulty** based on the active task
+3. Waits for the agent to submit a **question + explanation** conditioned on `{concept, mastery, difficulty}`
+4. A **judge model (ChatGPT)** scores explanation quality and question quality
+5. A **simulated student** attempts the question (sigmoid probability model)
+6. **Mastery is updated** — faster if correct (α=0.3), slower if not (β=0.1)
+7. Returns a **composite reward** across 5 weighted signals
 
-**Why this matters**: Adaptive explanation generation is an unsolved problem in ed-tech. This environment trains agents to optimize *how* to explain concepts, not just generate content - grounding reward in measurable student improvement.
+**Why this matters**: Adaptive explanation generation is an unsolved problem in ed-tech. This environment trains agents to optimize *how* to explain concepts — grounding reward in measurable student improvement and teaching quality.
+
+---
+
+## End-to-End Flow
+
+```
+state = {concept, mastery, difficulty, history}
+    ↓
+Agent (Qwen) generates {question, explanation}
+    ↓
+ChatGPT judges explanation quality → {correctness, clarity, example_quality, depth}
+ChatGPT judges question quality   → {relevance, difficulty_match, clarity, ...}
+    ↓
+Student simulation: P(correct) = sigmoid((mastery - bias) / temp) + guess - slip
+    ↓
+Mastery update: mastery += α * quality  (if correct)
+                mastery += β * quality  (if wrong)
+    ↓
+Composite reward = w1*mastery_gain + w2*correct + w3*difficulty_bonus
+                 + w4*explanation_quality + w5*question_quality
+    ↓
+RL updates agent (PPO / GRPO)
+```
+
+---
 
 ## Quick Start
 
@@ -41,7 +68,9 @@ The environment tracks per-concept mastery for a simulated student across 5 DSA 
 docker build -t adaptive-tutor:latest .
 
 # Run the server
-docker run -p 8000:8000 adaptive-tutor:latest
+docker run -p 8000:8000 \
+  -e OPENAI_API_KEY=sk-xxx \
+  adaptive-tutor:latest
 ```
 
 ### Using the Client
@@ -52,31 +81,38 @@ from adaptive_tutor_env import AdaptiveTutorEnv, CallToolAction, ListToolsAction
 
 async def main():
     async with AdaptiveTutorEnv(base_url="http://localhost:8000") as env:
-        # Reset - picks weakest concept, presents failed question
+        # Reset — picks weakest concept, sets difficulty from task
         obs = await env.reset(task="concept_recall")
-        print(f"Concept: {obs.metadata['concept']}")
-        print(f"Question: {obs.metadata['question']}")
-        print(f"Student answered: {obs.metadata['student_answer']}")
+        print(f"Concept:    {obs.metadata['concept']}")
+        print(f"Mastery:    {obs.metadata['mastery']:.2f}")
+        print(f"Difficulty: {obs.metadata['difficulty_label']}")
 
         # (Optional) Inspect available tools
         list_obs = await env.step(ListToolsAction())
 
-        # (Optional) Get full question context
-        q_obs = await env.step(CallToolAction(
-            tool_name="get_current_question", arguments={}
+        # (Optional) Get current state
+        state_obs = await env.step(CallToolAction(
+            tool_name="get_state", arguments={}
         ))
 
-        # Submit explanation - ends the episode
+        # Submit teaching action — ends the episode
         result = await env.step(CallToolAction(
-            tool_name="submit_explanation",
+            tool_name="submit_teaching_action",
             arguments={
-                "explanation": "Memoization stores overlapping subproblem results to avoid recomputation.",
-                "worked_example": "fib(5) = fib(4) + fib(3), each computed once and cached.",
+                "question": "What technique avoids recomputing overlapping subproblems in DP?",
+                "explanation": (
+                    "Memoization stores the result of each subproblem the first time it is solved, "
+                    "so subsequent calls return the cached value instead of recomputing. "
+                    "Example: fib(5) = fib(4) + fib(3); with memoization, fib(3) is computed "
+                    "once and reused in both branches."
+                ),
             }
         ))
-        print(f"Student correct on follow-up: {result.metadata['student_correct']}")
-        print(f"Reward: {result.reward:.2f}")
-        print(f"Done: {result.done}")
+        print(f"Explanation quality: {result.metadata['explanation_quality']:.2f}")
+        print(f"Question quality:    {result.metadata['question_quality']:.2f}")
+        print(f"Student correct:     {result.metadata['student_correct']}")
+        print(f"Mastery after:       {result.metadata['mastery_after']:.2f}")
+        print(f"Reward:              {result.reward:.4f}")
 
 asyncio.run(main())
 ```
@@ -84,114 +120,200 @@ asyncio.run(main())
 ### Running the Inference Script
 
 ```bash
-# Against HuggingFace router (hackathon standard)
+# Full flow with judge model + Qwen agent
+OPENAI_API_KEY=sk-xxx HF_TOKEN=hf_xxx python inference.py
+
+# Without judge key (falls back to keyword scoring)
 HF_TOKEN=hf_xxx python inference.py
 
 # Against a local model endpoint
 API_BASE_URL=http://localhost:8080/v1 MODEL_NAME=my-model HF_TOKEN=dummy python inference.py
 
 # Against Docker image
-LOCAL_IMAGE_NAME=adaptive-tutor:latest HF_TOKEN=hf_xxx python inference.py
+LOCAL_IMAGE_NAME=adaptive-tutor:latest HF_TOKEN=hf_xxx OPENAI_API_KEY=sk-xxx python inference.py
 ```
+
+---
 
 ## The 3 Tasks
 
-Tasks are selected via `reset(task=...)`. Each task uses a different difficulty level and grader.
+Tasks are selected via `reset(task=...)`. Each maps to a difficulty level.
 
-| Task | Difficulty | What the agent must explain | Grader |
-|------|-----------|----------------------------|--------|
-| `concept_recall` | Easy (1) | *What* the concept is - definitions, properties | `grade_easy`: reward ~ mastery gain |
-| `application_practice` | Medium (2) | *How* to apply the concept to a problem | `grade_medium`: reward for correcting the error |
-| `advanced_analysis` | Hard (3) | *Why* and *when* - trade-offs, complexity | `grade_hard`: mastery gain + difficulty bonus |
+| Task | Difficulty | Teaching Focus |
+|------|-----------|----------------|
+| `concept_recall` | Easy (1) | Definitions and basic understanding |
+| `application_practice` | Medium (2) | Applying the concept to a problem |
+| `advanced_analysis` | Hard (3) | Trade-offs, optimisation, edge cases |
+
+---
 
 ## DSA Concepts
 
-The environment covers 5 DSA concepts, each with 10 MCQ questions across 3 difficulties:
+5 concepts tracked, each with a default starting mastery:
 
-| Concept | Initial Mastery | Keywords scored in explanations |
-|---------|----------------|--------------------------------|
-| `dp` | 0.1 (weakest by default) | memoization, subproblem, overlapping, optimal, recurrence, tabulation |
-| `backtracking` | 0.3 | prune, explore, candidate, constraint, undo, recursion |
-| `trees` | 0.3 | node, root, leaf, traversal, height, parent, child |
-| `stack` | 0.5 | LIFO, push, pop, top, overflow, last in first out |
-| `arrays` | 0.8 (strongest) | index, contiguous, random access, O(1), iteration, element |
+| Concept | Default Mastery |
+|---------|----------------|
+| `dp` | 0.1 (weakest) |
+| `backtracking` | 0.3 |
+| `trees` | 0.3 |
+| `stack` | 0.5 |
+| `arrays` | 0.8 (strongest) |
+
+The agent always teaches the **weakest concept** (lowest mastery).
+
+---
 
 ## MCP Tools
 
-The agent has access to 3 MCP tools:
+The agent has access to 2 MCP tools:
 
 | Tool | Arguments | Description |
 |------|-----------|-------------|
-| `get_mastery_state` | *(none)* | Returns `{mastery: {concept: score}, weakest_concept: str}` |
-| `get_current_question` | *(none)* | Returns question text, options, student's wrong answer |
-| `submit_explanation` | `explanation: str, worked_example: str` | Scores the explanation, runs follow-up simulation, ends episode |
+| `get_state` | *(none)* | Returns `{concept, mastery, difficulty, difficulty_label, history}` |
+| `submit_teaching_action` | `question: str, explanation: str` | Triggers judge scoring, student simulation, mastery update, and reward |
 
-## Reward Functions
+---
 
-Reward is dispatched by task difficulty:
+## Agent Prompt (Qwen)
 
-**`grade_easy`** (concept_recall):
 ```
-reward = min(max((new_skill - prev_skill) * 2, 0), 1)
-```
-Rewards any mastery gain - partial credit for partial explanations.
+You are an expert DSA tutor.
 
-**`grade_medium`** (application_practice):
-```
-reward = 1.0 if correct else (0.5 if different_mistake else 0.0)
-```
-Full reward for correct follow-up; partial if student makes a *different* mistake (changed understanding).
+INPUT:
+- Concept: {concept}
+- Student mastery: {mastery} (0 to 1)
+- Target difficulty: {difficulty} (1=easy, 2=medium, 3=hard)
 
-**`grade_hard`** (advanced_analysis):
+TASK:
+1. Generate ONE question for the concept at the specified difficulty.
+2. Generate a clear explanation adapted to the student's mastery level.
+
+OUTPUT FORMAT (strict JSON):
+{
+  "question": "...",
+  "explanation": "...",
+  "difficulty": {difficulty},
+  "concept": "{concept}"
+}
 ```
-bonus = {easy: 0.2, medium: 0.5, hard: 1.0}[difficulty]
-reward = min(skill_gain + bonus, 1.0) if correct else max(skill_gain, 0)
-```
-Rewards both measurable skill gain and getting the follow-up correct, with a difficulty bonus.
+
+---
+
+## Judge Model (ChatGPT)
+
+### Explanation Quality
+
+Scored on 4 criteria (each 0–1), `final_score` = average:
+
+| Subscore | Description |
+|----------|-------------|
+| `correctness` | Technical accuracy |
+| `clarity` | Ease of understanding |
+| `example_quality` | Usefulness of the worked example |
+| `depth` | Appropriate depth for learning |
+
+### Question Quality
+
+Scored on 5 criteria (each 0–1), `final_score` = average:
+
+| Subscore | Description |
+|----------|-------------|
+| `relevance` | Relevance to the concept |
+| `difficulty_match` | Matches the target difficulty |
+| `clarity` | Unambiguous wording |
+| `non_triviality` | Not too obvious or trivial |
+| `answerability` | Clearly answerable |
+
+> If `OPENAI_API_KEY` is not set, explanation quality falls back to keyword coverage and question quality defaults to 0.5.
+
+---
 
 ## Student Model
 
-The simulated student uses a probabilistic model:
+Sigmoid-based probability with guess and slip noise:
 
 ```
-P(correct) = min(1.0, mastery / difficulty_int)
+P(correct) = sigmoid((mastery - difficulty_bias) / temperature)
+             + guess_prob - slip_prob
 ```
 
-- `difficulty_int`: 1 (easy), 2 (medium), 3 (hard)
-- Mastery starts at concept defaults and updates after each explanation
-- `new_mastery = min(1.0, old_mastery + 0.2 * explanation_quality)`
-- `explanation_quality` = fraction of concept keywords present in explanation + worked example
+| Parameter | Value |
+|-----------|-------|
+| `temperature` | 0.3 |
+| `guess_prob` | 0.10 |
+| `slip_prob` | 0.05 |
+| `difficulty_bias` | 0.3 / 0.5 / 0.7 for easy / medium / hard |
 
-## Episode Flow
+---
+
+## Mastery Update
+
+Learning rate depends on whether the student answered correctly:
 
 ```
-reset(task="application_practice", concept_mastery={"dp": 0.1, ...}, seed=42)
-  ↓ picks weakest concept ("dp")
-  ↓ picks an MCQ at difficulty 2
-  ↓ simulates student: P(correct) = 0.1/2 = 0.05 → almost certainly wrong
-  → Observation: question, options, student_answer="A", phase="awaiting_explanation"
+if correct:  mastery += α * explanation_quality   (α = 0.3)
+else:        mastery += β * explanation_quality   (β = 0.1)
 
-step(get_current_question)    → question details (optional)
-step(get_mastery_state)       → mastery dict (optional)
-
-step(submit_explanation(explanation=..., worked_example=...))
-  ↓ quality = keyword_coverage(explanation + worked_example, "dp")
-  ↓ new_skill = min(1.0, 0.1 + 0.2 * quality)
-  ↓ picks follow-up question (same concept, same difficulty, not seen before)
-  ↓ simulates student: P(correct) = new_skill / 2
-  ↓ reward = grade_medium(prev_error, new_error, correct)
-  → Observation(done=True, reward=..., metadata={student_correct, new_skill, ...})
+mastery = min(1.0, mastery)
 ```
+
+---
+
+## Composite Reward
+
+```
+reward = w1 * mastery_gain
+       + w2 * student_correct
+       + w3 * difficulty_bonus
+       + w4 * explanation_quality
+       + w5 * question_quality
+```
+
+| Component | Weight | Notes |
+|-----------|--------|-------|
+| Mastery gain `(new − old)` | 0.4 | Encourages genuine learning progress |
+| Student correct | 0.2 | Direct success signal |
+| Difficulty bonus | 0.1 | 0.2 / 0.5 / 1.0 for easy / medium / hard |
+| Explanation quality | 0.2 | Judge score |
+| Question quality | 0.1 | Judge score |
+
+All rewards are clamped to `(1e-6, 1 - 1e-6)`.
+
+---
+
+## Episode History
+
+Each completed step appends to `history` (accessible via `get_state()` and final `Observation.metadata`):
+
+```json
+{
+  "step": 1,
+  "concept": "dp",
+  "difficulty": "easy",
+  "explanation_quality": 0.82,
+  "question_quality": 0.75,
+  "correct": true,
+  "mastery_before": 0.10,
+  "mastery_after": 0.346,
+  "reward": 0.5484
+}
+```
+
+---
 
 ## Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `API_BASE_URL` | `https://router.huggingface.co/v1` | LLM API endpoint for inference.py |
-| `MODEL_NAME` | `Qwen/Qwen2.5-72B-Instruct` | Model identifier for inference.py |
-| `HF_TOKEN` | *(required)* | HuggingFace API key |
-| `LOCAL_IMAGE_NAME` | *(optional)* | Docker image name for from_docker_image() |
-| `ADAPTIVE_TUTOR_URL` | *(optional)* | Connect to running server instead of Docker |
+| `HF_TOKEN` | *(required)* | HuggingFace API key for Qwen agent |
+| `OPENAI_API_KEY` | *(optional)* | OpenAI API key for ChatGPT judge. Falls back to `HF_TOKEN` |
+| `API_BASE_URL` | `https://router.huggingface.co/v1` | LLM endpoint for agent |
+| `MODEL_NAME` | `Qwen/Qwen2.5-72B-Instruct` | Agent model identifier |
+| `JUDGE_BASE_URL` | *(optional)* | Custom base URL for judge model |
+| `LOCAL_IMAGE_NAME` | *(optional)* | Docker image for `from_docker_image()` |
+| `ADAPTIVE_TUTOR_URL` | *(optional)* | Connect to a running server instead of Docker |
+
+---
 
 ## Development
 
@@ -199,37 +321,17 @@ step(submit_explanation(explanation=..., worked_example=...))
 # Install dependencies
 pip install -e .
 
-# Run tests
-pytest tests/ -v
-
 # Run server locally
 uvicorn adaptive_tutor_env.server.app:app --reload --port 8000
+
+# Run inference (in-process, no server needed)
+OPENAI_API_KEY=sk-xxx HF_TOKEN=hf_xxx python inference.py
 
 # Health check
 curl http://localhost:8000/health
 ```
 
-## Project Structure
-
-```
-adaptive_tutor_env/
-├── __init__.py                  # Exports AdaptiveTutorEnv, CallToolAction, ListToolsAction
-├── client.py                    # AdaptiveTutorEnv(MCPToolClient)
-├── models.py                    # TutorState, Question dataclasses
-├── inference.py                 # Hackathon evaluation script (LLM agent runner)
-├── Dockerfile                   # Container image definition
-├── openenv.yaml                 # OpenEnv spec (name, runtime, port)
-├── pyproject.toml               # Package dependencies
-├── README.md                    # This file (also HuggingFace Space card)
-├── data/
-│   └── questions.json           # 50 MCQ questions: 5 concepts × 3 difficulties
-└── server/
-    ├── __init__.py
-    ├── app.py                   # create_app(AdaptiveTutorEnvironment, ...)
-    ├── tutor_environment.py     # MCPEnvironment subclass with 3 MCP tools
-    ├── student_model.py         # simulate_student, score_explanation, update_mastery
-    └── rewards.py               # grade_easy, grade_medium, grade_hard, compute_reward
-```
+---
 
 ## Integration with RL Frameworks
 
@@ -242,11 +344,14 @@ from adaptive_tutor_env import AdaptiveTutorEnv, CallToolAction
 async def rollout_func(prompts, completions, **kwargs):
     rewards = []
     async with AdaptiveTutorEnv(base_url="http://localhost:8000") as env:
-        for explanation_text in completions:
+        for output in completions:
             obs = await env.reset(task="concept_recall")
             result = await env.step(CallToolAction(
-                tool_name="submit_explanation",
-                arguments={"explanation": explanation_text, "worked_example": ""},
+                tool_name="submit_teaching_action",
+                arguments={
+                    "question": output.get("question", ""),
+                    "explanation": output.get("explanation", ""),
+                },
             ))
             rewards.append(result.reward)
     return rewards
@@ -262,11 +367,35 @@ env = AdaptiveTutorEnvironment()
 obs = env.reset(task="concept_recall", seed=42)
 
 result = env.step(CallToolAction(
-    tool_name="submit_explanation",
+    tool_name="submit_teaching_action",
     arguments={
-        "explanation": "Memoization caches overlapping subproblem results.",
-        "worked_example": "fib(n) = fib(n-1) + fib(n-2), cached per call.",
+        "question": "What is memoization?",
+        "explanation": "Memoization caches overlapping subproblem results to avoid recomputation.",
     }
 ))
-print(f"Reward: {result.reward:.2f}, Done: {result.done}")
+print(f"Reward: {result.reward:.4f}, Done: {result.done}")
+```
+
+---
+
+## Project Structure
+
+```
+adaptive_tutor_env/
+├── __init__.py                  # Exports AdaptiveTutorEnv, CallToolAction, ListToolsAction
+├── client.py                    # AdaptiveTutorEnv(MCPToolClient)
+├── models.py                    # TutorState, Question, TutorAction dataclasses
+├── inference.py                 # Hackathon evaluation script (Qwen agent runner)
+├── Dockerfile                   # Container image definition
+├── openenv.yaml                 # OpenEnv spec (name, runtime, port)
+├── pyproject.toml               # Package dependencies
+├── README.md                    # This file (also HuggingFace Space card)
+├── data/
+│   └── questions.json           # 50 MCQ questions: 5 concepts × 3 difficulties
+└── server/
+    ├── __init__.py
+    ├── app.py                   # create_app(AdaptiveTutorEnvironment, ...)
+    ├── tutor_environment.py     # MCPEnvironment: get_state, submit_teaching_action
+    ├── student_model.py         # sigmoid simulation, judge callers, mastery update
+    └── rewards.py               # composite reward (w1–w5)
 ```
