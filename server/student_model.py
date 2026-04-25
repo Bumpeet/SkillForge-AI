@@ -16,7 +16,7 @@ from random import Random
 from typing import Any, Dict, List, Optional
 
 import requests
-from ..models import DIFFICULTY_LABELS, TASK_DIFFICULTY, Question
+from models import DIFFICULTY_LABELS, TASK_DIFFICULTY, Question
 
 
 # ---------------------------------------------------------------------------

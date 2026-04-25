@@ -32,14 +32,14 @@ from openenv.core.env_server.mcp_environment import MCPEnvironment
 from openenv.core.env_server.mcp_types import CallToolAction
 from openenv.core.env_server.types import Action, Observation
 
-from ..models import (
+from models import (
     DIFFICULTY_LABELS,
     TASK_DIFFICULTY,
     TASKS,
     TutorState,
 )
-from .rewards import _EPS, compute_reward
-from .student_model import (
+from rewards import _EPS, compute_reward
+from student_model import (
     DEFAULT_MASTERY,
     mastery_to_difficulty,
     simulate_student,

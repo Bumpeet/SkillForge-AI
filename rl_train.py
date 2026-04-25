@@ -21,7 +21,10 @@ import argparse
 import json
 import os
 import re
+import sys
 from typing import Any, List
+
+import torch
 
 from datasets import Dataset
 from huggingface_hub import HfApi
@@ -30,11 +33,17 @@ from unsloth.chat_templates import get_chat_template
 from trl import GRPOTrainer, GRPOConfig
 
 # ---------------------------------------------------------------------------
-# Local imports — requires: pip install -e . (from the repo root)
+# Local imports — add repo root and server/ to sys.path for direct execution
 # ---------------------------------------------------------------------------
 
-from adaptive_tutor_env.server.tutor_environment import AdaptiveTutorEnvironment
-from adaptive_tutor_env.models import DIFFICULTY_LABELS
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+if os.path.join(_HERE, "server") not in sys.path:
+    sys.path.insert(0, os.path.join(_HERE, "server"))
+
+from server.tutor_environment import AdaptiveTutorEnvironment
+from models import DIFFICULTY_LABELS
 from openenv.core.env_server.mcp_types import CallToolAction
 
 # ---------------------------------------------------------------------------
@@ -216,7 +225,8 @@ def main(args: argparse.Namespace) -> None:
             per_device_train_batch_size=1,
             gradient_accumulation_steps=8,
             learning_rate=5e-6,
-            bf16=True,
+            bf16=torch.cuda.is_bf16_supported(),
+            fp16=not torch.cuda.is_bf16_supported(),
             logging_steps=5,
             save_strategy="epoch",
             num_generations=4,
