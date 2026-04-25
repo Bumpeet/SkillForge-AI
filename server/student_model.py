@@ -3,7 +3,7 @@ Simulated student model for the Adaptive Tutor environment.
 
 The student model provides:
 - Default concept mastery levels for a new student
-- Sigmoid-based student simulation with guess and slip probabilities
+- LLM-backed student simulation with analytic fallback
 - Differentiated mastery update (α when correct, β when incorrect)
 - ChatGPT judge callers for explanation and question quality scoring
 - Keyword fallback for when the judge API is unavailable
@@ -13,8 +13,9 @@ import json
 import os
 from math import ceil, exp
 from random import Random
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
+import requests
 from ..models import DIFFICULTY_LABELS, TASK_DIFFICULTY, Question
 
 
@@ -126,6 +127,7 @@ QUESTION_JUDGE_PROMPT = (
     "You are an expert evaluator of assessment quality.\n"
     "INPUT:\n"
     "- Concept: {concept}\n"
+    "- Student mastery: {mastery}\n"
     "- Difficulty: {difficulty}\n"
     "- Explanation: {explanation}\n"
     "- Question: {question}\n\n"
@@ -140,6 +142,37 @@ QUESTION_JUDGE_PROMPT = (
     "OUTPUT FORMAT (strict JSON only, no extra text):\n"
     '{{"relevance": float, "alignment": float, "difficulty_match": float, '
     '"clarity": float, "non_triviality": float, "final_score": float}}'
+)
+
+STUDENT_SIMULATION_PROMPT = (
+    "You are simulating a DSA student in a tutoring environment.\n\n"
+    "Your job is to behave like a real student, not an expert tutor.\n\n"
+    "You will be given:\n"
+    "- concept\n"
+    "- current mastery score from 0 to 1\n"
+    "- target difficulty\n"
+    "- previous mistakes\n"
+    "- teacher explanation\n"
+    "- teacher question\n\n"
+    "You must answer like a student whose knowledge matches the mastery score.\n\n"
+    "Behavior rules:\n"
+    "- If mastery is low (< 0.3), you should often be confused, miss key ideas, or give incomplete answers.\n"
+    "- If mastery is medium (0.3 to 0.7), you should understand some parts but still make application mistakes.\n"
+    "- If mastery is high (> 0.7), you should usually answer correctly, but may still make minor mistakes on hard questions.\n"
+    "- Use previous mistakes to stay consistent with past misunderstandings.\n"
+    "- Do not suddenly sound like an expert if mastery is low.\n"
+    "- Keep the answer short and realistic, like a student responding in an interview or classroom.\n"
+    "- If the explanation is very clear and well matched to the student, you may improve your answer.\n"
+    "- If the question is too hard for the mastery level, you should struggle.\n\n"
+    "Return JSON only in this format:\n"
+    '{{"student_answer": "...", "correct": true, "confidence": 0.0, "reasoning": "..."}}\n\n'
+    "INPUT:\n"
+    "- Concept: {concept}\n"
+    "- Mastery: {mastery}\n"
+    "- Target difficulty: {difficulty}\n"
+    "- Previous mistakes: {past_wrong_questions}\n"
+    "- Teacher explanation: {explanation}\n"
+    "- Teacher question: {question}\n"
 )
 
 
@@ -183,9 +216,9 @@ def mastery_to_difficulty(mastery: float) -> int:
 # ---------------------------------------------------------------------------
 
 
-def simulate_student(mastery: float, difficulty: int, rng: Random) -> bool:
+def _simulate_student_formula(mastery: float, difficulty: int, rng: Random) -> bool:
     """
-    Simulate a student attempting a question.
+    Simulate a student attempting a question analytically.
 
     P(correct) = sigmoid((mastery - difficulty_bias) / temperature)
                  + guess_prob - slip_prob
@@ -202,29 +235,130 @@ def simulate_student(mastery: float, difficulty: int, rng: Random) -> bool:
     return rng.random() < p
 
 
+def _call_openai_student(prompt: str) -> Dict[str, Any]:
+    """Call an OpenAI-compatible model to simulate the student."""
+    from openai import OpenAI
+
+    client = OpenAI(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        base_url=os.getenv("STUDENT_OPENAI_BASE_URL"),
+    )
+    response = client.chat.completions.create(
+        model=os.getenv("STUDENT_MODEL_NAME", "gpt-4o-mini"),
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.2,
+        max_tokens=250,
+    )
+    text = response.choices[0].message.content or ""
+    return _parse_json_response(text)
+
+
+def _call_gemini_student(prompt: str) -> Dict[str, Any]:
+    """Call Gemini via REST to simulate the student."""
+    api_key = os.getenv("GEMINI_API_KEY")
+    model = os.getenv("GEMINI_MODEL_NAME", "gemini-2.0-flash")
+    url = (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{model}:generateContent?key={api_key}"
+    )
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "temperature": 0.2,
+            "maxOutputTokens": 250,
+        },
+    }
+    response = requests.post(url, json=payload, timeout=30)
+    response.raise_for_status()
+    body = response.json()
+    candidates = body.get("candidates", [])
+    text = ""
+    if candidates:
+        parts = candidates[0].get("content", {}).get("parts", [])
+        text = "".join(part.get("text", "") for part in parts)
+    return _parse_json_response(text)
+
+
+def simulate_student(
+    concept: str,
+    mastery: float,
+    difficulty: int,
+    explanation: str,
+    question: str,
+    past_wrong_questions: Optional[List[str]],
+    rng: Random,
+) -> Dict[str, Any]:
+    """
+    Simulate a student attempting a question.
+
+    Prefers an LLM-backed student simulator using OpenAI, then Gemini.
+    Falls back to the analytic sigmoid simulator if no API key is available
+    or the LLM call fails.
+    """
+    difficulty_label = DIFFICULTY_LABELS.get(difficulty, "easy")
+    past_q_str = "; ".join(past_wrong_questions) if past_wrong_questions else "none"
+    safe_values = {
+        "concept": concept.replace("{", "{{").replace("}", "}}"),
+        "mastery": f"{mastery:.2f}",
+        "difficulty": difficulty_label,
+        "past_wrong_questions": past_q_str.replace("{", "{{").replace("}", "}}"),
+        "explanation": explanation.replace("{", "{{").replace("}", "}}"),
+        "question": question.replace("{", "{{").replace("}", "}}"),
+    }
+    prompt = STUDENT_SIMULATION_PROMPT.format(**safe_values)
+
+    try:
+        if os.getenv("OPENAI_API_KEY"):
+            result = _call_openai_student(prompt)
+            result["provider"] = "openai"
+            return result
+        if os.getenv("GEMINI_API_KEY"):
+            result = _call_gemini_student(prompt)
+            result["provider"] = "gemini"
+            return result
+    except Exception:
+        pass
+
+    correct = _simulate_student_formula(mastery, difficulty, rng)
+    return {
+        "student_answer": "",
+        "correct": correct,
+        "confidence": 0.5,
+        "reasoning": "Analytic fallback used.",
+        "provider": "formula",
+    }
+
+
 # ---------------------------------------------------------------------------
 # Mastery update
 # ---------------------------------------------------------------------------
 
 
-def update_mastery(old_mastery: float, quality: float, correct: bool) -> float:
+def update_mastery(old_mastery: float, confidence: float, correct: bool) -> float:
     """
-    Update mastery after seeing an explanation.
+    Update mastery after a tutoring interaction.
 
-    Uses a higher learning rate (ALPHA) when the student answered correctly,
-    and a lower rate (BETA) when incorrect, reflecting that correct responses
-    confirm actual learning while incorrect responses suggest partial learning.
+    Uses the student outcome as the learning signal. Correct answers with
+    higher confidence produce stronger mastery gains; incorrect answers still
+    yield a small gain to reflect partial learning from exposure.
 
     Args:
         old_mastery: Mastery before the explanation.
-        quality:     Explanation quality score in [0.0, 1.0].
+        confidence:  Student confidence in [0.0, 1.0].
         correct:     Whether the simulated student answered correctly.
 
     Returns:
         Updated mastery clamped to [0.0, 1.0].
     """
-    rate = ALPHA if correct else BETA
-    return min(1.0, old_mastery + rate * quality)
+    confidence = max(0.0, min(1.0, confidence))
+    if correct:
+        evidence = 0.5 + 0.5 * confidence
+        rate = ALPHA
+    else:
+        evidence = 0.2 * (1.0 - 0.5 * confidence)
+        rate = BETA
+    gain = rate * evidence * (1.0 - old_mastery)
+    return min(1.0, old_mastery + gain)
 
 
 # ---------------------------------------------------------------------------
@@ -328,6 +462,7 @@ def score_question_with_judge(
     difficulty: int,
     client: Any,
     explanation: str = "",
+    mastery: float = 0.5,
 ) -> Dict[str, Any]:
     """
     Call the judge model (ChatGPT) to score question quality.
@@ -347,6 +482,7 @@ def score_question_with_judge(
     safe_question = question.replace("{", "{{").replace("}", "}}")
     prompt = QUESTION_JUDGE_PROMPT.format(
         concept=concept,
+        mastery=f"{mastery:.2f}",
         difficulty=difficulty_label,
         explanation=safe_explanation,
         question=safe_question,

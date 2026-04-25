@@ -342,7 +342,7 @@ Each completed step appends to `history` (accessible via `get_state()` and final
 | `HF_TOKEN` | *(required)* | HuggingFace API key for Qwen agent |
 | `OPENAI_API_KEY` | *(optional)* | OpenAI API key for ChatGPT judge. Falls back to `HF_TOKEN` |
 | `API_BASE_URL` | `https://router.huggingface.co/v1` | LLM endpoint for agent |
-| `MODEL_NAME` | `Qwen/Qwen2.5-72B-Instruct` | Agent model identifier |
+| `MODEL_NAME` | `Qwen/Qwen2.5-7B-Instruct` | Agent model identifier |
 | `JUDGE_BASE_URL` | *(optional)* | Custom base URL for judge model |
 | `LOCAL_IMAGE_NAME` | *(optional)* | Docker image for `from_docker_image()` |
 | `ADAPTIVE_TUTOR_URL` | *(optional)* | Connect to a running server instead of Docker |

@@ -42,14 +42,14 @@ from .rewards import _EPS, compute_reward
 from .student_model import (
     DEFAULT_MASTERY,
     mastery_to_difficulty,
-    pick_weakest_concept,
-    score_explanation_with_judge,
-    score_question_with_judge,
     simulate_student,
     update_mastery,
 )
 
 logger = logging.getLogger(__name__)
+
+
+_DIFFICULTY_NAME_TO_VALUE = {label: value for value, label in DIFFICULTY_LABELS.items()}
 
 
 def _make_judge_client():
@@ -74,7 +74,7 @@ class AdaptiveTutorEnvironment(MCPEnvironment):
     Adaptive DSA tutor environment for RL training.
 
     Each episode:
-      - reset() selects the weakest concept and sets difficulty from mastery.
+      - reset() uses the requested concept and sets difficulty from task.
       - submit_teaching_action() tool triggers judge scoring, student simulation,
         mastery update, and reward computation.
 
@@ -98,13 +98,16 @@ class AdaptiveTutorEnvironment(MCPEnvironment):
             Returns a dict with:
               - concept: DSA concept to teach this episode
               - mastery: student's current mastery score in [0.0, 1.0]
-              - difficulty: target difficulty level (1=easy, 2=medium, 3=hard)
-              - difficulty_label: human-readable difficulty string
+              - targeted_difficulty: target difficulty level (1=easy, 2=medium, 3=hard)
+              - targeted_difficulty_label: human-readable difficulty string
+              - difficulty / difficulty_label: backward-compatible aliases
               - history: list of past step summaries in this session
             """
             return {
                 "concept": env._state.current_concept,
                 "mastery": env._state.prev_skill,
+                "targeted_difficulty": env._state.current_difficulty,
+                "targeted_difficulty_label": env._state.difficulty_label,
                 "difficulty": env._state.current_difficulty,
                 "difficulty_label": env._state.difficulty_label,
                 "history": list(env._state.history),
@@ -159,7 +162,10 @@ class AdaptiveTutorEnvironment(MCPEnvironment):
         seed: Optional[int] = None,
         episode_id: Optional[str] = None,
         task: str = "concept_recall",
+        concept: Optional[str] = None,
         concept_mastery: Optional[Dict[str, float]] = None,
+        history: Optional[List[Dict[str, Any]]] = None,
+        targeted_difficulty: Optional[Any] = None,
         **kwargs: Any,
     ) -> Observation:
         """
@@ -168,10 +174,16 @@ class AdaptiveTutorEnvironment(MCPEnvironment):
         Args:
             seed:            Random seed for reproducibility.
             episode_id:      Optional episode identifier.
-            task:            Task name — drives difficulty selection.
+            task:            Task name — fallback difficulty selection when
+                             targeted_difficulty is not provided.
                              One of: "concept_recall", "application_practice",
                              "advanced_analysis".
+            concept:         Concept selected by the student for this episode.
             concept_mastery: Initial mastery dict. Defaults to DEFAULT_MASTERY.
+            history:         Prior episode history for the same simulated student.
+            targeted_difficulty:
+                             Optional explicit difficulty override as
+                             "easy"/"medium"/"hard" or 1/2/3.
 
         Returns:
             Observation with the current state for the agent to condition on.
@@ -183,29 +195,33 @@ class AdaptiveTutorEnvironment(MCPEnvironment):
 
         mastery = dict(concept_mastery) if concept_mastery else dict(DEFAULT_MASTERY)
 
-        difficulty = TASK_DIFFICULTY[task]
+        difficulty = self._normalize_targeted_difficulty(targeted_difficulty)
+        if difficulty is None:
+            difficulty = TASK_DIFFICULTY[task]
         difficulty_label = DIFFICULTY_LABELS[difficulty]
 
-        concept = pick_weakest_concept(mastery)
-        prev_skill = mastery.get(concept, 0.1)
+        chosen_concept = concept or next(iter(mastery))
+        if chosen_concept not in mastery:
+            chosen_concept = next(iter(mastery))
+        prev_skill = mastery.get(chosen_concept, 0.1)
 
         self._state = TutorState(
             episode_id=episode_id or str(uuid4()),
             step_count=0,
             task=task,
             concept_mastery=mastery,
-            current_concept=concept,
+            current_concept=chosen_concept,
             current_difficulty=difficulty,
             difficulty_label=difficulty_label,
             prev_skill=prev_skill,
-            history=[],
+            history=list(history or []),
             phase="awaiting_action",
         )
 
         logger.info(
-            "Reset: task=%s concept=%s difficulty=%s mastery=%.2f",
+            "Reset: task=%s concept=%s targeted_difficulty=%s mastery=%.2f",
             task,
-            concept,
+            chosen_concept,
             difficulty_label,
             prev_skill,
         )
@@ -215,11 +231,13 @@ class AdaptiveTutorEnvironment(MCPEnvironment):
             reward=_EPS,
             metadata={
                 "task": task,
-                "concept": concept,
+                "concept": chosen_concept,
                 "mastery": prev_skill,
+                "targeted_difficulty": difficulty,
+                "targeted_difficulty_label": difficulty_label,
                 "difficulty": difficulty,
                 "difficulty_label": difficulty_label,
-                "history": [],
+                "history": list(history or []),
                 "phase": "awaiting_action",
             },
         )
@@ -295,13 +313,11 @@ class AdaptiveTutorEnvironment(MCPEnvironment):
         """
         Evaluate the agent's teaching action end-to-end.
 
-        1. Score explanation quality via the judge model (or keyword fallback).
-        2. Score question quality via the judge model (or heuristic fallback).
-        3. Simulate student: P(correct) = sigmoid((mastery-bias)/temp)+guess-slip
-        4. Update mastery: α*quality if correct, β*quality if not.
-        5. Compute composite reward.
-        6. Append step summary to history.
-        7. Return done=True Observation with full metadata.
+        1. Simulate the student response to the teaching action.
+        2. Update mastery from correctness and confidence.
+        3. Compute reward from student outcome and mastery gain.
+        4. Append step summary to history.
+        5. Return done=True Observation with full metadata.
         """
         concept = self._state.current_concept
         difficulty = self._state.current_difficulty
@@ -315,52 +331,42 @@ class AdaptiveTutorEnvironment(MCPEnvironment):
             if not h.get("correct") and h.get("question")
         ]
 
-        # 1. Score explanation quality
-        explanation_scores = score_explanation_with_judge(
-            explanation,
-            concept,
-            self._judge_client,
+        # 1. Simulate student
+        student_result = simulate_student(
+            concept=concept,
             mastery=prev_skill,
-            past_wrong_questions=past_wrong_questions,
             difficulty=difficulty,
-        )
-        explanation_quality = float(explanation_scores.get("final_score", 0.5))
-
-        # 2. Score question quality
-        question_scores = score_question_with_judge(
-            question,
-            concept,
-            difficulty,
-            self._judge_client,
             explanation=explanation,
+            question=question,
+            past_wrong_questions=past_wrong_questions,
+            rng=self._rng,
         )
-        question_quality = float(question_scores.get("final_score", 0.5))
+        correct = bool(student_result.get("correct", False))
+        confidence = float(student_result.get("confidence") or 0.0)
 
-        # 3. Simulate student
-        correct = simulate_student(prev_skill, difficulty, self._rng)
+        # 2. Update mastery from student outcome evidence
+        new_skill = update_mastery(prev_skill, confidence, correct)
 
-        # 4. Update mastery
-        new_skill = update_mastery(prev_skill, explanation_quality, correct)
-
-        # 5. Compute composite reward
+        # 3. Compute reward from student outcome + mastery gain
         reward = compute_reward(
             prev_skill=prev_skill,
             new_skill=new_skill,
             correct=correct,
             difficulty=difficulty,
-            explanation_quality=explanation_quality,
-            question_quality=question_quality,
+            confidence=confidence,
         )
 
-        # 6. Record history entry
+        # 4. Record history entry
         step_summary = {
             "step": self._state.step_count,
             "concept": concept,
             "difficulty": difficulty_label,
             "question": question,
-            "explanation_quality": round(explanation_quality, 4),
-            "question_quality": round(question_quality, 4),
             "correct": correct,
+            "student_answer": student_result.get("student_answer", ""),
+            "student_confidence": confidence,
+            "student_reasoning": student_result.get("reasoning", ""),
+            "student_provider": student_result.get("provider", "formula"),
             "mastery_before": round(prev_skill, 4),
             "mastery_after": round(new_skill, 4),
             "reward": round(reward, 4),
@@ -372,15 +378,14 @@ class AdaptiveTutorEnvironment(MCPEnvironment):
         self._state.phase = "done"
 
         logger.info(
-            "Episode %s done: concept=%s expl_quality=%.2f q_quality=%.2f "
-            "prev_skill=%.2f new_skill=%.2f correct=%s reward=%.4f",
+            "Episode %s done: concept=%s prev_skill=%.2f new_skill=%.2f "
+            "correct=%s confidence=%.2f reward=%.4f",
             self._state.episode_id,
             concept,
-            explanation_quality,
-            question_quality,
             prev_skill,
             new_skill,
             correct,
+            confidence,
             reward,
         )
 
@@ -392,24 +397,11 @@ class AdaptiveTutorEnvironment(MCPEnvironment):
                 "task": self._state.task,
                 "concept": concept,
                 "difficulty": difficulty_label,
-                "explanation_quality": explanation_quality,
-                "explanation_subscores": {
-                    k: explanation_scores.get(k)
-                    for k in ("correctness", "clarity", "example_quality", "relevance", "depth")
-                },
-                "explanation_issues": explanation_scores.get("issues", []),
-                "question_quality": question_quality,
-                "question_subscores": {
-                    k: question_scores.get(k)
-                    for k in (
-                        "relevance",
-                        "alignment",
-                        "difficulty_match",
-                        "clarity",
-                        "non_triviality",
-                    )
-                },
                 "student_correct": correct,
+                "student_answer": student_result.get("student_answer", ""),
+                "student_confidence": confidence,
+                "student_reasoning": student_result.get("reasoning", ""),
+                "student_provider": student_result.get("provider", "formula"),
                 "mastery_before": prev_skill,
                 "mastery_after": new_skill,
                 "updated_mastery": dict(self._state.concept_mastery),
@@ -421,6 +413,21 @@ class AdaptiveTutorEnvironment(MCPEnvironment):
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _normalize_targeted_difficulty(value: Optional[Any]) -> Optional[int]:
+        """Normalize explicit targeted difficulty input to 1/2/3."""
+        if value is None:
+            return None
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized.isdigit():
+                parsed = int(normalized)
+                return parsed if parsed in DIFFICULTY_LABELS else None
+            return _DIFFICULTY_NAME_TO_VALUE.get(normalized)
+        if isinstance(value, int) and value in DIFFICULTY_LABELS:
+            return value
+        return None
 
     @property
     def state(self) -> TutorState:
