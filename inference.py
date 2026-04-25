@@ -75,18 +75,14 @@ TEACHING_SYSTEM_PROMPT: str = textwrap.dedent("""
     - Avoid trivial or ambiguous questions.
     - Ensure a clear correct answer exists.
 
-    OUTPUT RULES:
-    - Return valid JSON only.
-    - Do not use markdown fences.
-    - Do not include any text before or after the JSON object.
-    - Escape all newlines inside JSON strings as \\n.
+    OUTPUT RULES (critical — training and reward parsing depend on this):
+    - Return exactly one JSON object and nothing else. The first non-whitespace character MUST be '{{' and the last non-whitespace character MUST be '}}'.
+    - No markdown, no code fences (no ```), no labels such as OUTPUT:, Example:, EXPLANATION:, or NOTE: outside the JSON.
+    - The object MUST have exactly two keys, both non-empty strings: "explanation" (teaching material) and "question" (one follow-up). No other top-level keys.
+    - Do not use placeholders: never output the literal ellipsis "..." or empty strings for either field. Do not echo template text or "fill in the blank" examples.
+    - Do not output a second JSON object, JavaScript/Python/C++ samples, or extra '{{' / '}}' blocks outside that single object. Put any code or examples inside the two string values only, with valid JSON escaping.
+    - Inside strings, escape newlines as \\n and internal double quotes as \\". Do not paste raw multi-line JSON or unescaped control characters inside a string.
     - Use double quotes for all keys and string values.
-
-    OUTPUT (strict JSON only):
-    {{
-      "explanation": "...",
-      "question": "..."
-    }}
 """).strip()
 
 

@@ -22,7 +22,8 @@ import json
 import os
 import re
 import sys
-from typing import Any, List
+import time
+from typing import Any, List, Optional
 
 import torch
 
@@ -56,8 +57,7 @@ _DIFFICULTY_NAME_TO_INT = {"easy": 1, "medium": 2, "hard": 3}
 
 EPISODE_FLOWS_PATH = os.path.join(os.path.dirname(__file__), "data", "episode_flows.json")
 
-# Mirrors inference.py's TEACHING_SYSTEM_PROMPT so the SFT checkpoint is
-# already conditioned on this exact format.
+# Keep OUTPUT RULES in sync with inference.TEACHING_SYSTEM_PROMPT (same JSON contract).
 SYSTEM_PROMPT = (
     "You are an expert DSA tutor and problem setter.\n\n"
     "INPUT:\n"
@@ -69,11 +69,14 @@ SYSTEM_PROMPT = (
     "Generate both:\n"
     "1. Teaching material that will help the student improve.\n"
     "2. One follow-up question that directly tests the material you generated.\n\n"
-    "OUTPUT RULES:\n"
-    "- Return valid JSON only. No markdown fences.\n"
-    "- No text before or after the JSON object.\n"
-    "- Escape newlines inside strings as \\n.\n\n"
-    'OUTPUT: {{"explanation": "...", "question": "..."}}'
+    "OUTPUT RULES (critical — reward parsing depends on this):\n"
+    "- Return exactly one JSON object and nothing else. The first non-whitespace character MUST be '{' and the last non-whitespace character MUST be '}'.\n"
+    "- No markdown, no code fences (no ```), no labels such as OUTPUT:, Example:, EXPLANATION:, or NOTE: outside the JSON.\n"
+    "- The object MUST have exactly two keys, both non-empty strings: \"explanation\" (teaching material) and \"question\" (one follow-up). No other top-level keys.\n"
+    "- Do not use placeholders: never output the literal ellipsis \"...\" or empty strings for either field. Do not echo template text or \"fill in the blank\" examples.\n"
+    "- Do not output a second JSON object, JavaScript/Python/C++ samples, or extra '{' / '}' blocks outside that single object. Put any code or examples inside the two string values only, with valid JSON escaping.\n"
+    "- Inside strings, escape newlines as \\n and internal double quotes as \\\". Do not paste raw multi-line JSON or unescaped control characters inside a string.\n"
+    "- Use double quotes for all keys and string values.\n"
 )
 
 
@@ -110,6 +113,142 @@ def _sanitize_json(text: str) -> str:
         else:
             result.append(ch)
     return "".join(result)
+
+
+def _debug_log(run_id: str, hypothesis_id: str, location: str, message: str, data: dict) -> None:
+    payload = {
+        "sessionId": "372f04",
+        "runId": run_id,
+        "hypothesisId": hypothesis_id,
+        "location": location,
+        "message": message,
+        "data": data,
+        "timestamp": int(time.time() * 1000),
+    }
+    try:
+        with open(os.path.join(_HERE, "debug-372f04.log"), "a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=True) + "\n")
+    except Exception:
+        pass
+
+
+def _reward_payload_score(d: dict) -> int:
+    """Prefer non-empty explanation+question; reject placeholders and template stubs."""
+    exp = str(d.get("explanation", "")).strip()
+    q = str(d.get("question", "")).strip()
+    if not exp or not q:
+        return -1
+    if exp in ("...", "…") and q in ("...", "…"):
+        return -1
+    if exp == "..." or q == "...":
+        return -1
+    return len(exp) + len(q)
+
+
+def _try_raw_decode_reward_dict(stripped: str) -> Optional[dict]:
+    decoder = json.JSONDecoder()
+    if not stripped.startswith("{"):
+        return None
+    for body in (stripped, _sanitize_json(stripped)):
+        try:
+            obj, _ = decoder.raw_decode(body)
+            if isinstance(obj, dict) and ("explanation" in obj or "question" in obj):
+                return obj
+        except json.JSONDecodeError:
+            continue
+    return None
+
+
+def _fenced_json_blobs(text: str) -> List[str]:
+    out = []
+    for m in re.finditer(r"```(?:json)?\s*([\s\S]*?)```", text, re.IGNORECASE):
+        chunk = m.group(1).strip()
+        if chunk:
+            out.append(chunk)
+    return out
+
+
+def _collect_reward_dict_candidates(text: str) -> List[dict]:
+    seen: set[tuple] = set()
+    found: List[dict] = []
+
+    def add(obj: dict) -> None:
+        key = (str(obj.get("explanation", "")), str(obj.get("question", "")))
+        if key in seen:
+            return
+        seen.add(key)
+        found.append(obj)
+
+    blobs: List[str] = []
+    blobs.extend(_fenced_json_blobs(text))
+    blobs.append(text)
+
+    for blob in blobs:
+        stripped = blob.lstrip()
+        if stripped.startswith("{"):
+            d = _try_raw_decode_reward_dict(stripped)
+            if d:
+                add(d)
+        for idx, ch in enumerate(blob):
+            if ch != "{":
+                continue
+            d = _try_raw_decode_reward_dict(blob[idx:].lstrip())
+            if d:
+                add(d)
+    return found
+
+
+_REWARD_KV_PATTERN = re.compile(
+    r'"explanation"\s*:\s*"((?:[^"\\]|\\.)*)"\s*,\s*"question"\s*:\s*"((?:[^"\\]|\\.)*)"',
+    re.DOTALL,
+)
+
+
+def _regex_extract_reward_kv(text: str) -> Optional[dict]:
+    m = _REWARD_KV_PATTERN.search(text)
+    if not m:
+        return None
+    try:
+        exp = json.loads('"' + m.group(1) + '"')
+        q = json.loads('"' + m.group(2) + '"')
+    except json.JSONDecodeError:
+        return None
+    return {"explanation": str(exp), "question": str(q)}
+
+
+def _extract_reward_json_impl(text: str) -> tuple[dict, dict]:
+    """
+    Returns (payload, meta) where meta supports debug logs (candidate counts, path taken).
+    """
+    candidates = _collect_reward_dict_candidates(text)
+    scored = [(d, _reward_payload_score(d)) for d in candidates]
+    viable = [(d, s) for d, s in scored if s >= 0]
+    meta: dict = {
+        "candidate_count": len(candidates),
+        "viable_count": len(viable),
+        "max_raw_score": max((s for _, s in scored), default=-1),
+    }
+    if viable:
+        best_d, best_s = max(viable, key=lambda x: x[1])
+        meta["chosen_score"] = best_s
+        meta["via"] = "json"
+        return best_d, meta
+    fallback = _regex_extract_reward_kv(text)
+    if fallback is not None and _reward_payload_score(fallback) >= 0:
+        meta["chosen_score"] = _reward_payload_score(fallback)
+        meta["via"] = "regex"
+        return fallback, meta
+    raise json.JSONDecodeError("No valid reward JSON object found", text, 0)
+
+
+def _extract_reward_json(text: str) -> dict:
+    """
+    Robustly extract one JSON object containing explanation/question from noisy LLM output.
+    Collects all raw_decode candidates (incl. fenced ```json blocks), scores them, picks best.
+    Falls back to regex when JSON is truncated but key strings are well-formed.
+    """
+    d, _ = _extract_reward_json_impl(text)
+    return d
 
 
 # ---------------------------------------------------------------------------
@@ -178,10 +317,42 @@ def reward_fn(completions: List[Any], prompts: List[Any], **kwargs) -> List[floa
 
     for i, completion in enumerate(completions):
         # GRPOTrainer passes completions as list-of-messages or raw strings
+        # region agent log
+        _debug_log(
+            run_id="pre-fix",
+            hypothesis_id="H1",
+            location="rl_train.py:reward_fn:completion-shape",
+            message="Incoming completion container shape",
+            data={
+                "example_index": i,
+                "completion_type": type(completion).__name__,
+                "is_list": isinstance(completion, list),
+                "list_len": len(completion) if isinstance(completion, list) else None,
+                "last_item_type": type(completion[-1]).__name__ if isinstance(completion, list) and completion else None,
+            },
+        )
+        # endregion
         if isinstance(completion, list):
             text = completion[-1]["content"] if completion else ""
         else:
             text = str(completion)
+
+        # region agent log
+        _debug_log(
+            run_id="pre-fix",
+            hypothesis_id="H2",
+            location="rl_train.py:reward_fn:text-preview",
+            message="Raw completion text preview and brace metrics",
+            data={
+                "example_index": i,
+                "text_len": len(text),
+                "open_braces": text.count("{"),
+                "close_braces": text.count("}"),
+                "preview_start": text[:180],
+                "preview_end": text[-180:],
+            },
+        )
+        # endregion
 
         concept    = concepts[i]
         mastery    = float(masteries[i])
@@ -191,10 +362,38 @@ def reward_fn(completions: List[Any], prompts: List[Any], **kwargs) -> List[floa
         try:
             m = re.search(r"\{.*\}", text, re.DOTALL)
             raw = m.group() if m else text
-            try:
-                parsed = json.loads(raw)
-            except json.JSONDecodeError:
-                parsed = json.loads(_sanitize_json(raw))
+            # region agent log
+            _debug_log(
+                run_id="pre-fix",
+                hypothesis_id="H3",
+                location="rl_train.py:reward_fn:raw-capture",
+                message="Regex capture details before JSON parse",
+                data={
+                    "example_index": i,
+                    "used_regex_match": bool(m),
+                    "raw_len": len(raw),
+                    "raw_preview_start": raw[:180],
+                    "raw_preview_end": raw[-180:],
+                },
+            )
+            # endregion
+            parsed, parse_meta = _extract_reward_json_impl(text)
+            # region agent log
+            _debug_log(
+                run_id="post-parser-change",
+                hypothesis_id="H5",
+                location="rl_train.py:reward_fn:parser-result",
+                message="Structured extractor produced reward JSON",
+                data={
+                    "example_index": i,
+                    "has_explanation": "explanation" in parsed,
+                    "has_question": "question" in parsed,
+                    "explanation_len": len(str(parsed.get("explanation", ""))),
+                    "question_len": len(str(parsed.get("question", ""))),
+                    **parse_meta,
+                },
+            )
+            # endregion
             explanation = str(parsed.get("explanation", "")).strip()
             question    = str(parsed.get("question", "")).strip()
             if not explanation or not question:
