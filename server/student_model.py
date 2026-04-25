@@ -389,19 +389,55 @@ def score_explanation(explanation: str, concept: str) -> float:
 # ---------------------------------------------------------------------------
 
 
+def _sanitize_json_string(text: str) -> str:
+    """Fix invalid escape sequences and literal control characters inside JSON strings."""
+    result = []
+    in_string = False
+    escaped = False
+    _valid_escapes = set('"\\\/bfnrtu')
+    for ch in text:
+        if escaped:
+            escaped = False
+            if ch not in _valid_escapes:
+                result[-1] = "\\\\"
+            result.append(ch)
+        elif ch == "\\" and in_string:
+            escaped = True
+            result.append(ch)
+        elif ch == '"':
+            in_string = not in_string
+            result.append(ch)
+        elif in_string and ch == "\n":
+            result.append("\\n")
+        elif in_string and ch == "\r":
+            result.append("\\r")
+        elif in_string and ch == "\t":
+            result.append("\\t")
+        elif in_string and ord(ch) < 0x20:
+            result.append(f"\\u{ord(ch):04x}")
+        else:
+            result.append(ch)
+    return "".join(result)
+
+
 def _parse_json_response(text: str) -> dict:
     """
     Extract and parse the first complete JSON object from LLM output.
 
     Uses { ... } boundaries instead of splitting on backticks, which breaks
     when the model embeds ```code``` blocks inside JSON string values.
+    Falls back to sanitizing invalid escapes and literal control characters
+    before retrying.
     """
     text = text.strip()
     start = text.find("{")
     end = text.rfind("}")
     if start != -1 and end != -1 and end > start:
-        return json.loads(text[start : end + 1])
-    return json.loads(text)
+        text = text[start : end + 1]
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return json.loads(_sanitize_json_string(text))
 
 
 def score_explanation_with_judge(

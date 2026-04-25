@@ -35,7 +35,7 @@ from typing import Any, Dict, List, Optional
 # ---------------------------------------------------------------------------
 
 API_BASE_URL: str = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
-MODEL_NAME: str = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-1.5B-Instruct")
+MODEL_NAME: str = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-1.5B-Instruct:featherless-ai")
 API_KEY: Optional[str] = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
 IMAGE_NAME: Optional[str] = os.getenv("LOCAL_IMAGE_NAME")
 SELECTED_CONCEPT: str = os.getenv("TUTOR_CONCEPT", "arrays")
@@ -128,20 +128,61 @@ def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> No
 # ---------------------------------------------------------------------------
 
 
+def _sanitize_json_string(text: str) -> str:
+    """
+    Fix common LLM JSON issues without a full parser:
+    - Literal control characters (newline, tab, etc.) inside string values.
+    - Invalid escape sequences like \\( or \\e that JSON does not allow.
+    """
+    result = []
+    in_string = False
+    escaped = False
+    _valid_escapes = set('"\\\/bfnrtu')
+    for ch in text:
+        if escaped:
+            escaped = False
+            if ch not in _valid_escapes:
+                # Replace the lone backslash we already appended with a
+                # double-backslash so the sequence becomes valid JSON.
+                result[-1] = "\\\\"
+            result.append(ch)
+        elif ch == "\\" and in_string:
+            escaped = True
+            result.append(ch)
+        elif ch == '"':
+            in_string = not in_string
+            result.append(ch)
+        elif in_string and ch == "\n":
+            result.append("\\n")
+        elif in_string and ch == "\r":
+            result.append("\\r")
+        elif in_string and ch == "\t":
+            result.append("\\t")
+        elif in_string and ord(ch) < 0x20:
+            result.append(f"\\u{ord(ch):04x}")
+        else:
+            result.append(ch)
+    return "".join(result)
+
+
 def _parse_llm_json(text: str) -> dict:
     """
     Extract and parse the first complete JSON object from LLM output.
 
     Finds the outermost { ... } rather than splitting on backticks, which
     breaks when the model embeds ```code``` blocks inside the JSON string value.
+    Falls back to sanitizing common LLM JSON quirks (bad escapes, literal
+    control chars) before retrying.
     """
     text = text.strip()
     start = text.find("{")
     end = text.rfind("}")
     if start != -1 and end != -1 and end > start:
-        return json.loads(text[start : end + 1])
-    # Fallback: try to parse the whole text as-is
-    return json.loads(text)
+        text = text[start : end + 1]
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return json.loads(_sanitize_json_string(text))
 
 
 def get_teaching_output(
@@ -430,5 +471,8 @@ if __name__ == "__main__":
     src_path = os.path.join(repo_root, "src")
     if src_path not in sys.path:
         sys.path.insert(0, src_path)
+    server_path = os.path.join(repo_root, "server")
+    if server_path not in sys.path:
+        sys.path.insert(0, server_path)
 
     asyncio.run(main())
