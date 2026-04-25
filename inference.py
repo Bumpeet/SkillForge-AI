@@ -7,7 +7,7 @@ emits structured logs for automated evaluation.
 
 Required environment variables:
     API_BASE_URL      LLM endpoint  (default: https://router.huggingface.co/v1)
-    MODEL_NAME        Model identifier (default: Qwen/Qwen2.5-72B-Instruct)
+    MODEL_NAME        Model identifier (default: Qwen/Qwen2.5-1.5B-Instruct)
     HF_TOKEN          API key (also checked as API_KEY)
     OPENAI_API_KEY    API key for the judge model (ChatGPT). Falls back to HF_TOKEN.
     JUDGE_BASE_URL    Optional base URL for the judge model endpoint.
@@ -35,19 +35,19 @@ from typing import Any, Dict, List, Optional
 # ---------------------------------------------------------------------------
 
 API_BASE_URL: str = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
-MODEL_NAME: str = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
+MODEL_NAME: str = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-1.5B-Instruct")
 API_KEY: Optional[str] = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
 IMAGE_NAME: Optional[str] = os.getenv("LOCAL_IMAGE_NAME")
+SELECTED_CONCEPT: str = os.getenv("TUTOR_CONCEPT", "arrays")
 
 TASKS: List[str] = ["concept_recall", "application_practice", "advanced_analysis"]
 SUCCESS_THRESHOLD: float = 0.3  # reward >= threshold → success
-_EPS: float = 1e-6  # ensures scores are strictly between 0 and 1
-TEMPERATURE: float = 0.7
-MAX_TOKENS_EXPLANATION: int = 1500  # explanation needs more tokens
-MAX_TOKENS_QUESTION: int = 400
+_EPS: float = 1e-6  # tiny positive floor used only for unexpected exceptions
+TEMPERATURE: float = 0.2
+MAX_TOKENS_TEACHING_OUTPUT: int = 1800
 
-EXPLANATION_SYSTEM_PROMPT: str = textwrap.dedent("""
-    You are an expert DSA tutor.
+TEACHING_SYSTEM_PROMPT: str = textwrap.dedent("""
+    You are an expert DSA tutor and problem setter.
 
     INPUT:
     - Concept: {concept}
@@ -56,45 +56,35 @@ EXPLANATION_SYSTEM_PROMPT: str = textwrap.dedent("""
     - Target difficulty: {difficulty}
 
     TASK:
-    Generate learning material to improve the student.
+    Generate both:
+    1. Teaching material that will help the student improve.
+    2. One follow-up question that directly tests the material you generated.
 
     GUIDELINES:
-    - Focus on mistakes from previous questions
+    - Focus on mistakes from previous questions when relevant.
     - Adapt to mastery:
       - <0.3 → simple, intuitive, step-by-step
       - 0.3–0.7 → balanced explanation + examples
       - >0.7 → concise, focus on edge cases
-    - Include: intuition, key idea, worked example
-    - Avoid unnecessary verbosity
-
-    OUTPUT (strict JSON only, no extra text):
-    {{
-      "explanation": "..."
-    }}
-""").strip()
-
-QUESTION_SYSTEM_PROMPT: str = textwrap.dedent("""
-    You are an expert problem setter.
-
-    INPUT:
-    - Concept: {concept}
-    - Difficulty: {difficulty}
-    - Explanation: {explanation}
-
-    TASK:
-    Generate ONE question that tests the concepts taught in the explanation.
-
-    GUIDELINES:
-    - Must directly relate to explanation
+    - Include in the material: intuition, key idea, worked example.
+    - The follow-up question must directly relate to the material.
     - Match difficulty:
       - Easy → definition/basic
       - Medium → application
       - Hard → reasoning/optimization
-    - Avoid trivial or ambiguous questions
-    - Ensure clear correct answer exists
+    - Avoid trivial or ambiguous questions.
+    - Ensure a clear correct answer exists.
 
-    OUTPUT (strict JSON only, no extra text):
+    OUTPUT RULES:
+    - Return valid JSON only.
+    - Do not use markdown fences.
+    - Do not include any text before or after the JSON object.
+    - Escape all newlines inside JSON strings as \\n.
+    - Use double quotes for all keys and string values.
+
+    OUTPUT (strict JSON only):
     {{
+      "explanation": "...",
       "question": "..."
     }}
 """).strip()
@@ -154,84 +144,65 @@ def _parse_llm_json(text: str) -> dict:
     return json.loads(text)
 
 
-def get_explanation(
+def get_teaching_output(
     client: Any,
     concept: str,
     mastery: float,
     difficulty: int,
     difficulty_label: str,
     past_wrong_questions: List[str],
-) -> str:
+) -> Dict[str, Any]:
     """
-    Call Qwen to generate a teaching explanation.
+    Call Qwen once to generate both teaching material and a follow-up question.
 
     Conditions on concept, mastery, difficulty, and past wrong questions.
-    Returns the explanation string.
+    Returns a dict with ``ok``, ``explanation``, ``question``, and ``error`` keys.
     """
     past_q_str = "; ".join(past_wrong_questions) if past_wrong_questions else "none"
     try:
         # Escape braces in user content to prevent str.format() misinterpretation
         safe_past = past_q_str.replace("{", "{{").replace("}", "}}")
-        prompt = EXPLANATION_SYSTEM_PROMPT.format(
+        prompt = TEACHING_SYSTEM_PROMPT.format(
             concept=concept,
             mastery=f"{mastery:.2f}",
             past_wrong_questions=safe_past,
             difficulty=difficulty_label,
         )
-        print(f"[DEBUG] Calling Qwen for explanation: concept={concept} mastery={mastery:.2f} difficulty={difficulty_label}", flush=True)
+        print(
+            f"[DEBUG] Calling Qwen for teaching output: concept={concept} mastery={mastery:.2f} difficulty={difficulty_label}",
+            flush=True,
+        )
         completion = client.chat.completions.create(
             model=MODEL_NAME,
             messages=[{"role": "user", "content": prompt}],
             temperature=TEMPERATURE,
-            max_tokens=MAX_TOKENS_EXPLANATION,
+            max_tokens=MAX_TOKENS_TEACHING_OUTPUT,
         )
         raw = (completion.choices[0].message.content or "").strip()
-        print(f"[DEBUG] Explanation raw response (first 120 chars): {raw[:120]!r}", flush=True)
-        explanation = _parse_llm_json(raw).get("explanation", "")
-        print(f"[DEBUG] Explanation parsed OK, length={len(explanation)}", flush=True)
-        return explanation
+        print(f"[DEBUG] Teaching raw response (first 120 chars): {raw[:120]!r}", flush=True)
+        parsed = _parse_llm_json(raw)
+        explanation = str(parsed.get("explanation", "")).strip()
+        question = str(parsed.get("question", "")).strip()
+        if not explanation or not question:
+            raise ValueError("Model response missing explanation or question")
+        print(
+            f"[DEBUG] Teaching parsed OK, explanation_len={len(explanation)} question_len={len(question)}",
+            flush=True,
+        )
+        return {
+            "ok": True,
+            "explanation": explanation,
+            "question": question,
+            "error": None,
+        }
     except Exception as exc:
-        print(f"[DEBUG] Explanation LLM call failed: {type(exc).__name__}: {exc}", flush=True)
-        return (
-            f"The concept of {concept} involves understanding its core principles. "
-            f"At {difficulty_label} difficulty, focus on applying these principles step by step."
-        )
-
-
-def get_question(
-    client: Any,
-    concept: str,
-    difficulty_label: str,
-    explanation: str,
-) -> str:
-    """
-    Call Qwen to generate a question conditioned on the explanation.
-
-    Returns the question string.
-    """
-    try:
-        # Escape braces in LLM-generated explanation to prevent str.format() misinterpretation
-        safe_explanation = explanation.replace("{", "{{").replace("}", "}}")
-        prompt = QUESTION_SYSTEM_PROMPT.format(
-            concept=concept,
-            difficulty=difficulty_label,
-            explanation=safe_explanation,
-        )
-        print(f"[DEBUG] Calling Qwen for question: concept={concept} difficulty={difficulty_label}", flush=True)
-        completion = client.chat.completions.create(
-            model=MODEL_NAME,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=TEMPERATURE,
-            max_tokens=MAX_TOKENS_QUESTION,
-        )
-        raw = (completion.choices[0].message.content or "").strip()
-        print(f"[DEBUG] Question raw response (first 120 chars): {raw[:120]!r}", flush=True)
-        question = _parse_llm_json(raw).get("question", "")
-        print(f"[DEBUG] Question parsed OK, length={len(question)}", flush=True)
-        return question
-    except Exception as exc:
-        print(f"[DEBUG] Question LLM call failed: {type(exc).__name__}: {exc}", flush=True)
-        return f"What is the key principle behind {concept} at {difficulty_label} difficulty?"
+        print(f"[DEBUG] Teaching LLM call failed: {type(exc).__name__}: {exc}", flush=True)
+        return {
+            "ok": False,
+            "explanation": "",
+            "question": "",
+            "error": f"{type(exc).__name__}: {exc}",
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -253,7 +224,7 @@ async def run_task(task: str, client: Any, env_factory) -> None:
         env = await env_factory(task)
 
         # --- Reset ---
-        reset_result = await env.reset(task=task)
+        reset_result = await env.reset(task=task, concept=SELECTED_CONCEPT)
         reset_meta = reset_result.metadata if hasattr(reset_result, "metadata") else {}
 
         # --- Step 1: list available tools ---
@@ -284,8 +255,11 @@ async def run_task(task: str, client: Any, env_factory) -> None:
 
         concept = context.get("concept", "?")
         mastery = context.get("mastery", 0.5)
-        difficulty = context.get("difficulty", 1)
-        difficulty_label = context.get("difficulty_label", "easy")
+        difficulty = context.get("targeted_difficulty", context.get("difficulty", 1))
+        difficulty_label = context.get(
+            "targeted_difficulty_label",
+            context.get("difficulty_label", "easy"),
+        )
 
         # Extract past wrong questions from history
         history = context.get("history", [])
@@ -295,13 +269,20 @@ async def run_task(task: str, client: Any, env_factory) -> None:
             if not h.get("correct") and h.get("question")
         ]
 
-        # --- Step 3a: agent generates explanation (Qwen call 1) ---
-        explanation = get_explanation(
+        # --- Step 3: agent generates teaching material + follow-up question (single Qwen call) ---
+        teaching_output = get_teaching_output(
             client, concept, mastery, difficulty, difficulty_label, past_wrong_questions
         )
+        if not teaching_output.get("ok"):
+            log_step(3, "submit_teaching_action(parse_failed)", 0.0, True, teaching_output.get("error"))
+            rewards.append(0.0)
+            steps_taken = 3
+            score = 0.0
+            success = False
+            return
 
-        # --- Step 3b: agent generates question conditioned on explanation (Qwen call 2) ---
-        question = get_question(client, concept, difficulty_label, explanation)
+        explanation = teaching_output["explanation"]
+        question = teaching_output["question"]
 
         action_str = f"submit_teaching_action(concept={concept},q_len={len(question)},e_len={len(explanation)})"
 
@@ -322,7 +303,7 @@ async def run_task(task: str, client: Any, env_factory) -> None:
         rewards.append(reward)
         steps_taken = 3
 
-        score = max(_EPS, min(1.0 - _EPS, reward))
+        score = max(0.0, min(1.0, reward))
         success = score >= SUCCESS_THRESHOLD
 
     except Exception as exc:

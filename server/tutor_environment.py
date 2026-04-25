@@ -343,6 +343,9 @@ class AdaptiveTutorEnvironment(MCPEnvironment):
         )
         correct = bool(student_result.get("correct", False))
         confidence = float(student_result.get("confidence") or 0.0)
+        question_tag = str(
+            student_result.get("question_tag") or f"{concept}_{self._state.step_count}"
+        ).strip()
 
         # 2. Update mastery from student outcome evidence
         new_skill = update_mastery(prev_skill, confidence, correct)
@@ -356,12 +359,14 @@ class AdaptiveTutorEnvironment(MCPEnvironment):
             confidence=confidence,
         )
 
-        # 4. Record history entry
+        # 4. Record history entry — store tag in "question" for prompt context,
+        #    full text in "question_full" for judge/debug use
         step_summary = {
             "step": self._state.step_count,
             "concept": concept,
             "difficulty": difficulty_label,
-            "question": question,
+            "question": question_tag,
+            "question_full": question,
             "correct": correct,
             "student_answer": student_result.get("student_answer", ""),
             "student_confidence": confidence,

@@ -7,9 +7,9 @@ Install (Colab):
 
 Usage:
     python rl_train.py \
-        --sft_model Bumpeet/qwen2.5-7b-adaptive-tutor-sft \
+        --sft_model Bumpeet/qwen2.5-1.5b-adaptive-tutor-sft \
         --output runs/rl-v1 \
-        --hub_repo Bumpeet/qwen2.5-7b-adaptive-tutor-rl
+        --hub_repo Bumpeet/qwen2.5-1.5b-adaptive-tutor-rl
 
 Environment variables:
     HF_TOKEN        — Hugging Face token (for Hub push and model download)
@@ -21,7 +21,7 @@ import argparse
 import json
 import os
 import re
-from typing import Any, Dict, List
+from typing import Any, List
 
 from datasets import Dataset
 from huggingface_hub import HfApi
@@ -34,8 +34,7 @@ from trl import GRPOTrainer, GRPOConfig
 # ---------------------------------------------------------------------------
 
 from adaptive_tutor_env.server.tutor_environment import AdaptiveTutorEnvironment
-from adaptive_tutor_env.server.student_model import DEFAULT_MASTERY
-from adaptive_tutor_env.models import TASKS, TASK_DIFFICULTY, DIFFICULTY_LABELS
+from adaptive_tutor_env.models import DIFFICULTY_LABELS
 from openenv.core.env_server.mcp_types import CallToolAction
 
 # ---------------------------------------------------------------------------
@@ -43,7 +42,10 @@ from openenv.core.env_server.mcp_types import CallToolAction
 # ---------------------------------------------------------------------------
 
 MAX_SEQ_LENGTH = 2048
-CONCEPTS = list(DEFAULT_MASTERY.keys())   # ["arrays", "stack", "trees", "backtracking", "dp"]
+
+_DIFFICULTY_NAME_TO_INT = {"easy": 1, "medium": 2, "hard": 3}
+
+EPISODE_FLOWS_PATH = os.path.join(os.path.dirname(__file__), "data", "episode_flows.json")
 
 # Mirrors inference.py's TEACHING_SYSTEM_PROMPT so the SFT checkpoint is
 # already conditioned on this exact format.
@@ -67,29 +69,41 @@ SYSTEM_PROMPT = (
 
 
 # ---------------------------------------------------------------------------
-# Dataset — one row per (concept × task) combination
+# Dataset — loaded from episode_flows.json
 # ---------------------------------------------------------------------------
 
-def make_prompt_dataset() -> Dataset:
+def make_prompt_dataset(flows_path: str = EPISODE_FLOWS_PATH) -> Dataset:
+    with open(flows_path, encoding="utf-8") as f:
+        flows = json.load(f)
+
     rows = []
-    for concept in CONCEPTS:
-        for task in TASKS:
-            difficulty = TASK_DIFFICULTY[task]
-            label = DIFFICULTY_LABELS[difficulty]
-            mastery = DEFAULT_MASTERY.get(concept, 0.3)
-            prompt = SYSTEM_PROMPT.format(
-                concept=concept,
-                mastery=mastery,
-                mistakes="none",
-                difficulty=label,
-            )
-            rows.append({
-                "prompt": prompt,
-                "concept": concept,
-                "mastery": mastery,
-                "difficulty": difficulty,
-                "task": task,
-            })
+    for flow in flows:
+        concept    = flow["concept"]
+        mastery    = float(flow["mastery"])
+        raw_diff   = flow["target_difficulty"]
+        difficulty = _DIFFICULTY_NAME_TO_INT.get(str(raw_diff).lower(), int(raw_diff))
+        label      = DIFFICULTY_LABELS[difficulty]
+        past_wrong = flow.get("past_wrong_questions") or []
+
+        history = [
+            {"question": tag, "correct": False, "step": i + 1}
+            for i, tag in enumerate(past_wrong)
+        ]
+
+        prompt = SYSTEM_PROMPT.format(
+            concept=concept,
+            mastery=mastery,
+            mistakes="; ".join(past_wrong) if past_wrong else "none",
+            difficulty=label,
+        )
+        rows.append({
+            "prompt": prompt,
+            "concept": concept,
+            "mastery": mastery,
+            "difficulty": difficulty,
+            "history": history,
+        })
+
     return Dataset.from_list(rows)
 
 
@@ -105,16 +119,16 @@ def reward_fn(completions: List[Any], prompts: List[Any], **kwargs) -> List[floa
     """
     For each model completion:
       1. Parse JSON to extract explanation + question.
-      2. Reset the environment with the row's concept/mastery/task.
+      2. Reset the environment with the row's concept/mastery/difficulty/history.
       3. Call submit_teaching_action via env.step().
       4. Return the scalar reward from the Observation.
 
     Returns 0.0 for any parse failure or environment error.
     """
-    concepts: List[str]   = kwargs["concept"]
+    concepts: List[str]    = kwargs["concept"]
     masteries: List[float] = kwargs["mastery"]
     difficulties: List[int] = kwargs["difficulty"]
-    tasks: List[str]      = kwargs["task"]
+    histories: List[List]  = kwargs["history"]
 
     rewards = []
 
@@ -128,10 +142,9 @@ def reward_fn(completions: List[Any], prompts: List[Any], **kwargs) -> List[floa
         concept    = concepts[i]
         mastery    = float(masteries[i])
         difficulty = int(difficulties[i])
-        task       = tasks[i]
+        history    = histories[i] if histories[i] else []
 
         try:
-            # Parse JSON output from the model
             m = re.search(r"\{.*\}", text, re.DOTALL)
             parsed = json.loads(m.group()) if m else json.loads(text)
             explanation = str(parsed.get("explanation", "")).strip()
@@ -140,16 +153,14 @@ def reward_fn(completions: List[Any], prompts: List[Any], **kwargs) -> List[floa
                 rewards.append(0.0)
                 continue
 
-            # Reset env for this concept/task
             _env.reset(
                 seed=i,
-                task=task,
                 concept=concept,
                 concept_mastery={concept: mastery},
+                targeted_difficulty=difficulty,
+                history=history,
             )
 
-            # Submit the teaching action — this triggers simulate_student,
-            # update_mastery, and compute_reward inside the environment.
             obs = _env.step(
                 CallToolAction(
                     tool_name="submit_teaching_action",
@@ -175,7 +186,7 @@ def main(args: argparse.Namespace) -> None:
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=args.sft_model,
         max_seq_length=MAX_SEQ_LENGTH,
-        dtype=None,         # auto-detects bf16/fp16
+        dtype=None,
         load_in_4bit=True,
     )
     tokenizer = get_chat_template(tokenizer, chat_template="qwen-2.5")
@@ -192,8 +203,8 @@ def main(args: argparse.Namespace) -> None:
         random_state=42,
     )
 
-    dataset = make_prompt_dataset()
-    print(f"Dataset size: {len(dataset)} prompts ({len(CONCEPTS)} concepts × {len(TASKS)} tasks)")
+    dataset = make_prompt_dataset(args.flows)
+    print(f"Dataset size: {len(dataset)} prompts loaded from {args.flows}")
 
     trainer = GRPOTrainer(
         model=model,
@@ -204,13 +215,13 @@ def main(args: argparse.Namespace) -> None:
             num_train_epochs=2,
             per_device_train_batch_size=1,
             gradient_accumulation_steps=8,
-            learning_rate=5e-6,         # lower than SFT — RL is sensitive
+            learning_rate=5e-6,
             bf16=True,
             logging_steps=5,
             save_strategy="epoch",
-            num_generations=4,          # rollouts per prompt per GRPO step
+            num_generations=4,
             max_new_tokens=600,
-            temperature=0.8,            # diversity for rollouts
+            temperature=0.8,
             report_to="none",
         ),
         train_dataset=dataset,
@@ -245,11 +256,13 @@ def main(args: argparse.Namespace) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--sft_model", default="Bumpeet/qwen2.5-7b-adaptive-tutor-sft",
+    parser.add_argument("--sft_model", default="Bumpeet/qwen2.5-1.5b-adaptive-tutor-sft",
                         help="HF repo or local path of the SFT checkpoint to start from")
     parser.add_argument("--output",    default="runs/rl-v1")
+    parser.add_argument("--flows",     default=EPISODE_FLOWS_PATH,
+                        help="Path to episode_flows.json")
     parser.add_argument("--merge",     action="store_true",
                         help="merge LoRA into base after training")
     parser.add_argument("--hub_repo",  default=None,
-                        help="HF repo to push to, e.g. Bumpeet/qwen2.5-7b-adaptive-tutor-rl")
+                        help="HF repo to push to, e.g. Bumpeet/qwen2.5-1.5b-adaptive-tutor-rl")
     main(parser.parse_args())

@@ -1,0 +1,834 @@
+[
+  {
+    "concept": "dp",
+    "mastery": 0.13,
+    "past_wrong_questions": [
+      "dp_fibonacci",
+      "dp_min_cost_climbing",
+      "dp_climbing_stairs"
+    ],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "stack",
+    "mastery": 0.17,
+    "past_wrong_questions": [
+      "stack_reverse_string"
+    ],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "linkedLists",
+    "mastery": 0.23,
+    "past_wrong_questions": [
+      "ll_detect_cycle",
+      "ll_middle_node",
+      "ll_reverse"
+    ],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "trees",
+    "mastery": 0.21,
+    "past_wrong_questions": [
+      "trees_height"
+    ],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "bitManipulation",
+    "mastery": 0.85,
+    "past_wrong_questions": [],
+    "target_difficulty": "hard"
+  },
+  {
+    "concept": "backtracking",
+    "mastery": 0.14,
+    "past_wrong_questions": [
+      "backtracking_subsets",
+      "backtracking_permutations"
+    ],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "trees",
+    "mastery": 0.24,
+    "past_wrong_questions": [
+      "trees_level_order",
+      "trees_height"
+    ],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "bitManipulation",
+    "mastery": 0.84,
+    "past_wrong_questions": [
+      "bit_count_bits_dp",
+      "bit_missing_number_advanced"
+    ],
+    "target_difficulty": "medium"
+  },
+  {
+    "concept": "dp",
+    "mastery": 0.85,
+    "past_wrong_questions": [
+      "dp_edit_distance",
+      "dp_burst_balloons"
+    ],
+    "target_difficulty": "hard"
+  },
+  {
+    "concept": "trees",
+    "mastery": 0.81,
+    "past_wrong_questions": [
+      "trees_recover_bst"
+    ],
+    "target_difficulty": "hard"
+  },
+  {
+    "concept": "bitManipulation",
+    "mastery": 0.64,
+    "past_wrong_questions": [
+      "bit_number_complement"
+    ],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "dp",
+    "mastery": 0.84,
+    "past_wrong_questions": [],
+    "target_difficulty": "hard"
+  },
+  {
+    "concept": "linkedLists",
+    "mastery": 0.22,
+    "past_wrong_questions": [
+      "ll_middle_node"
+    ],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "trees",
+    "mastery": 0.64,
+    "past_wrong_questions": [
+      "trees_diameter",
+      "trees_lca"
+    ],
+    "target_difficulty": "medium"
+  },
+  {
+    "concept": "stack",
+    "mastery": 0.15,
+    "past_wrong_questions": [
+      "stack_reverse_string"
+    ],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "backtracking",
+    "mastery": 0.76,
+    "past_wrong_questions": [
+      "backtracking_expression_add_operators",
+      "backtracking_n_queens_full"
+    ],
+    "target_difficulty": "medium"
+  },
+  {
+    "concept": "arrays",
+    "mastery": 0.18,
+    "past_wrong_questions": [
+      "arrays_prefix_sum"
+    ],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "trees",
+    "mastery": 0.82,
+    "past_wrong_questions": [],
+    "target_difficulty": "hard"
+  },
+  {
+    "concept": "dp",
+    "mastery": 0.53,
+    "past_wrong_questions": [
+      "dp_knapsack"
+    ],
+    "target_difficulty": "medium"
+  },
+  {
+    "concept": "arrays",
+    "mastery": 0.22,
+    "past_wrong_questions": [],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "stack",
+    "mastery": 0.47,
+    "past_wrong_questions": [
+      "stack_daily_temperatures",
+      "stack_min_stack"
+    ],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "backtracking",
+    "mastery": 0.64,
+    "past_wrong_questions": [
+      "backtracking_n_queens_partial"
+    ],
+    "target_difficulty": "medium"
+  },
+  {
+    "concept": "dp",
+    "mastery": 0.58,
+    "past_wrong_questions": [
+      "dp_knapsack",
+      "dp_coin_change",
+      "dp_longest_common_subsequence"
+    ],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "backtracking",
+    "mastery": 0.11,
+    "past_wrong_questions": [
+      "backtracking_permutations"
+    ],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "backtracking",
+    "mastery": 0.88,
+    "past_wrong_questions": [
+      "backtracking_expression_add_operators",
+      "backtracking_n_queens_full"
+    ],
+    "target_difficulty": "medium"
+  },
+  {
+    "concept": "stack",
+    "mastery": 0.18,
+    "past_wrong_questions": [
+      "stack_reverse_string",
+      "stack_balanced_parentheses"
+    ],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "dp",
+    "mastery": 0.2,
+    "past_wrong_questions": [
+      "dp_fibonacci",
+      "dp_min_cost_climbing",
+      "dp_climbing_stairs"
+    ],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "dp",
+    "mastery": 0.77,
+    "past_wrong_questions": [
+      "dp_burst_balloons",
+      "dp_edit_distance",
+      "dp_palindrome_partitioning"
+    ],
+    "target_difficulty": "hard"
+  },
+  {
+    "concept": "dp",
+    "mastery": 0.5,
+    "past_wrong_questions": [
+      "dp_longest_common_subsequence",
+      "dp_knapsack"
+    ],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "arrays",
+    "mastery": 0.5,
+    "past_wrong_questions": [
+      "arrays_kadane"
+    ],
+    "target_difficulty": "medium"
+  },
+  {
+    "concept": "linkedLists",
+    "mastery": 0.86,
+    "past_wrong_questions": [],
+    "target_difficulty": "hard"
+  },
+  {
+    "concept": "arrays",
+    "mastery": 0.21,
+    "past_wrong_questions": [
+      "arrays_sliding_window_basic",
+      "arrays_two_pointer"
+    ],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "arrays",
+    "mastery": 0.6,
+    "past_wrong_questions": [
+      "arrays_merge_intervals",
+      "arrays_kadane",
+      "arrays_next_permutation"
+    ],
+    "target_difficulty": "medium"
+  },
+  {
+    "concept": "backtracking",
+    "mastery": 0.14,
+    "past_wrong_questions": [
+      "backtracking_subsets",
+      "backtracking_permutations",
+      "backtracking_combinations"
+    ],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "arrays",
+    "mastery": 0.81,
+    "past_wrong_questions": [
+      "arrays_trapping_rain_water",
+      "arrays_median_two_sorted",
+      "arrays_largest_rectangle_histogram"
+    ],
+    "target_difficulty": "medium"
+  },
+  {
+    "concept": "linkedLists",
+    "mastery": 0.12,
+    "past_wrong_questions": [
+      "ll_reverse"
+    ],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "dp",
+    "mastery": 0.19,
+    "past_wrong_questions": [
+      "dp_fibonacci",
+      "dp_climbing_stairs",
+      "dp_min_cost_climbing"
+    ],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "stack",
+    "mastery": 0.57,
+    "past_wrong_questions": [
+      "stack_evaluate_rpn"
+    ],
+    "target_difficulty": "medium"
+  },
+  {
+    "concept": "trees",
+    "mastery": 0.87,
+    "past_wrong_questions": [
+      "trees_binary_tree_cameras"
+    ],
+    "target_difficulty": "hard"
+  },
+  {
+    "concept": "backtracking",
+    "mastery": 0.5,
+    "past_wrong_questions": [
+      "backtracking_n_queens_partial",
+      "backtracking_combination_sum"
+    ],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "arrays",
+    "mastery": 0.14,
+    "past_wrong_questions": [
+      "arrays_two_pointer",
+      "arrays_prefix_sum"
+    ],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "dp",
+    "mastery": 0.89,
+    "past_wrong_questions": [
+      "dp_burst_balloons"
+    ],
+    "target_difficulty": "hard"
+  },
+  {
+    "concept": "dp",
+    "mastery": 0.14,
+    "past_wrong_questions": [],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "backtracking",
+    "mastery": 0.79,
+    "past_wrong_questions": [],
+    "target_difficulty": "hard"
+  },
+  {
+    "concept": "bitManipulation",
+    "mastery": 0.87,
+    "past_wrong_questions": [
+      "bit_missing_number_advanced",
+      "bit_maximum_xor"
+    ],
+    "target_difficulty": "hard"
+  },
+  {
+    "concept": "bitManipulation",
+    "mastery": 0.18,
+    "past_wrong_questions": [],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "backtracking",
+    "mastery": 0.62,
+    "past_wrong_questions": [
+      "backtracking_word_search"
+    ],
+    "target_difficulty": "medium"
+  },
+  {
+    "concept": "dp",
+    "mastery": 0.47,
+    "past_wrong_questions": [
+      "dp_coin_change"
+    ],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "stack",
+    "mastery": 0.83,
+    "past_wrong_questions": [
+      "stack_largest_rectangle",
+      "stack_maximal_rectangle"
+    ],
+    "target_difficulty": "medium"
+  },
+  {
+    "concept": "trees",
+    "mastery": 0.14,
+    "past_wrong_questions": [
+      "trees_level_order"
+    ],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "arrays",
+    "mastery": 0.87,
+    "past_wrong_questions": [
+      "arrays_largest_rectangle_histogram"
+    ],
+    "target_difficulty": "hard"
+  },
+  {
+    "concept": "arrays",
+    "mastery": 0.79,
+    "past_wrong_questions": [
+      "arrays_largest_rectangle_histogram",
+      "arrays_trapping_rain_water"
+    ],
+    "target_difficulty": "hard"
+  },
+  {
+    "concept": "arrays",
+    "mastery": 0.2,
+    "past_wrong_questions": [],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "arrays",
+    "mastery": 0.61,
+    "past_wrong_questions": [
+      "arrays_kadane"
+    ],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "linkedLists",
+    "mastery": 0.61,
+    "past_wrong_questions": [
+      "ll_merge_two_sorted",
+      "ll_remove_nth_from_end",
+      "ll_reorder_list"
+    ],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "dp",
+    "mastery": 0.19,
+    "past_wrong_questions": [
+      "dp_min_cost_climbing"
+    ],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "bitManipulation",
+    "mastery": 0.14,
+    "past_wrong_questions": [
+      "bit_single_number",
+      "bit_power_of_two"
+    ],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "arrays",
+    "mastery": 0.57,
+    "past_wrong_questions": [
+      "arrays_next_permutation",
+      "arrays_kadane"
+    ],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "bitManipulation",
+    "mastery": 0.64,
+    "past_wrong_questions": [
+      "bit_subsets_using_bits",
+      "bit_reverse_bits"
+    ],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "stack",
+    "mastery": 0.8,
+    "past_wrong_questions": [
+      "stack_largest_rectangle"
+    ],
+    "target_difficulty": "hard"
+  },
+  {
+    "concept": "dp",
+    "mastery": 0.62,
+    "past_wrong_questions": [],
+    "target_difficulty": "medium"
+  },
+  {
+    "concept": "trees",
+    "mastery": 0.75,
+    "past_wrong_questions": [
+      "trees_binary_tree_cameras",
+      "trees_recover_bst"
+    ],
+    "target_difficulty": "medium"
+  },
+  {
+    "concept": "bitManipulation",
+    "mastery": 0.2,
+    "past_wrong_questions": [
+      "bit_single_number"
+    ],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "linkedLists",
+    "mastery": 0.76,
+    "past_wrong_questions": [
+      "ll_copy_with_random_pointer"
+    ],
+    "target_difficulty": "hard"
+  },
+  {
+    "concept": "bitManipulation",
+    "mastery": 0.46,
+    "past_wrong_questions": [
+      "bit_number_complement",
+      "bit_subsets_using_bits"
+    ],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "bitManipulation",
+    "mastery": 0.5,
+    "past_wrong_questions": [
+      "bit_subsets_using_bits"
+    ],
+    "target_difficulty": "medium"
+  },
+  {
+    "concept": "bitManipulation",
+    "mastery": 0.86,
+    "past_wrong_questions": [
+      "bit_count_bits_dp"
+    ],
+    "target_difficulty": "medium"
+  },
+  {
+    "concept": "arrays",
+    "mastery": 0.79,
+    "past_wrong_questions": [
+      "arrays_largest_rectangle_histogram"
+    ],
+    "target_difficulty": "hard"
+  },
+  {
+    "concept": "linkedLists",
+    "mastery": 0.64,
+    "past_wrong_questions": [
+      "ll_remove_nth_from_end"
+    ],
+    "target_difficulty": "medium"
+  },
+  {
+    "concept": "linkedLists",
+    "mastery": 0.49,
+    "past_wrong_questions": [
+      "ll_remove_nth_from_end",
+      "ll_reorder_list",
+      "ll_merge_two_sorted"
+    ],
+    "target_difficulty": "medium"
+  },
+  {
+    "concept": "arrays",
+    "mastery": 0.6,
+    "past_wrong_questions": [],
+    "target_difficulty": "medium"
+  },
+  {
+    "concept": "trees",
+    "mastery": 0.45,
+    "past_wrong_questions": [
+      "trees_lca",
+      "trees_diameter"
+    ],
+    "target_difficulty": "medium"
+  },
+  {
+    "concept": "arrays",
+    "mastery": 0.78,
+    "past_wrong_questions": [
+      "arrays_trapping_rain_water",
+      "arrays_largest_rectangle_histogram"
+    ],
+    "target_difficulty": "hard"
+  },
+  {
+    "concept": "stack",
+    "mastery": 0.45,
+    "past_wrong_questions": [
+      "stack_evaluate_rpn",
+      "stack_daily_temperatures"
+    ],
+    "target_difficulty": "medium"
+  },
+  {
+    "concept": "linkedLists",
+    "mastery": 0.77,
+    "past_wrong_questions": [
+      "ll_lru_cache",
+      "ll_copy_with_random_pointer"
+    ],
+    "target_difficulty": "medium"
+  },
+  {
+    "concept": "stack",
+    "mastery": 0.15,
+    "past_wrong_questions": [
+      "stack_balanced_parentheses"
+    ],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "dp",
+    "mastery": 0.79,
+    "past_wrong_questions": [
+      "dp_burst_balloons",
+      "dp_edit_distance"
+    ],
+    "target_difficulty": "medium"
+  },
+  {
+    "concept": "arrays",
+    "mastery": 0.11,
+    "past_wrong_questions": [
+      "arrays_two_pointer",
+      "arrays_prefix_sum"
+    ],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "trees",
+    "mastery": 0.46,
+    "past_wrong_questions": [],
+    "target_difficulty": "medium"
+  },
+  {
+    "concept": "trees",
+    "mastery": 0.53,
+    "past_wrong_questions": [
+      "trees_diameter"
+    ],
+    "target_difficulty": "medium"
+  },
+  {
+    "concept": "linkedLists",
+    "mastery": 0.89,
+    "past_wrong_questions": [
+      "ll_lru_cache",
+      "ll_merge_k_sorted"
+    ],
+    "target_difficulty": "medium"
+  },
+  {
+    "concept": "stack",
+    "mastery": 0.88,
+    "past_wrong_questions": [
+      "stack_largest_rectangle",
+      "stack_decode_string"
+    ],
+    "target_difficulty": "hard"
+  },
+  {
+    "concept": "dp",
+    "mastery": 0.6,
+    "past_wrong_questions": [
+      "dp_knapsack",
+      "dp_coin_change"
+    ],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "arrays",
+    "mastery": 0.53,
+    "past_wrong_questions": [
+      "arrays_merge_intervals"
+    ],
+    "target_difficulty": "medium"
+  },
+  {
+    "concept": "dp",
+    "mastery": 0.14,
+    "past_wrong_questions": [
+      "dp_climbing_stairs",
+      "dp_fibonacci"
+    ],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "bitManipulation",
+    "mastery": 0.24,
+    "past_wrong_questions": [
+      "bit_single_number",
+      "bit_power_of_two",
+      "bit_count_ones"
+    ],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "trees",
+    "mastery": 0.5,
+    "past_wrong_questions": [],
+    "target_difficulty": "medium"
+  },
+  {
+    "concept": "trees",
+    "mastery": 0.77,
+    "past_wrong_questions": [
+      "trees_binary_tree_cameras",
+      "trees_serialize_deserialize"
+    ],
+    "target_difficulty": "hard"
+  },
+  {
+    "concept": "linkedLists",
+    "mastery": 0.21,
+    "past_wrong_questions": [
+      "ll_middle_node",
+      "ll_reverse",
+      "ll_detect_cycle"
+    ],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "trees",
+    "mastery": 0.12,
+    "past_wrong_questions": [
+      "trees_height",
+      "trees_inorder_traversal",
+      "trees_level_order"
+    ],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "bitManipulation",
+    "mastery": 0.54,
+    "past_wrong_questions": [
+      "bit_subsets_using_bits"
+    ],
+    "target_difficulty": "medium"
+  },
+  {
+    "concept": "arrays",
+    "mastery": 0.19,
+    "past_wrong_questions": [],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "stack",
+    "mastery": 0.79,
+    "past_wrong_questions": [
+      "stack_largest_rectangle",
+      "stack_maximal_rectangle"
+    ],
+    "target_difficulty": "hard"
+  },
+  {
+    "concept": "linkedLists",
+    "mastery": 0.62,
+    "past_wrong_questions": [
+      "ll_remove_nth_from_end"
+    ],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "backtracking",
+    "mastery": 0.2,
+    "past_wrong_questions": [
+      "backtracking_permutations"
+    ],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "backtracking",
+    "mastery": 0.51,
+    "past_wrong_questions": [
+      "backtracking_combination_sum",
+      "backtracking_word_search"
+    ],
+    "target_difficulty": "medium"
+  },
+  {
+    "concept": "trees",
+    "mastery": 0.17,
+    "past_wrong_questions": [],
+    "target_difficulty": "easy"
+  },
+  {
+    "concept": "dp",
+    "mastery": 0.52,
+    "past_wrong_questions": [
+      "dp_coin_change",
+      "dp_longest_common_subsequence",
+      "dp_knapsack"
+    ],
+    "target_difficulty": "medium"
+  },
+  {
+    "concept": "backtracking",
+    "mastery": 0.83,
+    "past_wrong_questions": [
+      "backtracking_n_queens_full"
+    ],
+    "target_difficulty": "hard"
+  },
+  {
+    "concept": "stack",
+    "mastery": 0.47,
+    "past_wrong_questions": [],
+    "target_difficulty": "medium"
+  }
+]

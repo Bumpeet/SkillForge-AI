@@ -165,7 +165,11 @@ STUDENT_SIMULATION_PROMPT = (
     "- If the explanation is very clear and well matched to the student, you may improve your answer.\n"
     "- If the question is too hard for the mastery level, you should struggle.\n\n"
     "Return JSON only in this format:\n"
-    '{{"student_answer": "...", "correct": true, "confidence": 0.0, "reasoning": "..."}}\n\n'
+    '{{"student_answer": "...", "correct": true, "confidence": 0.0, "reasoning": "...", "question_tag": "concept_topic_keyword"}}\n\n'
+    "question_tag rules:\n"
+    "- 2-4 words joined by underscores, all lowercase\n"
+    "- Derived from the concept and the specific topic the question tests\n"
+    "- Examples: dp_base_case, arrays_two_pointer, trees_inorder_traversal\n\n"
     "INPUT:\n"
     "- Concept: {concept}\n"
     "- Mastery: {mastery}\n"
