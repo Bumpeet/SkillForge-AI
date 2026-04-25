@@ -31,6 +31,7 @@ from huggingface_hub import HfApi
 from unsloth import FastLanguageModel
 from unsloth.chat_templates import get_chat_template
 from trl import GRPOTrainer, GRPOConfig
+from transformers import GenerationConfig
 
 # ---------------------------------------------------------------------------
 # Local imports — add repo root and server/ to sys.path for direct execution
@@ -75,6 +76,41 @@ SYSTEM_PROMPT = (
     "- Escape newlines inside strings as \\n.\n\n"
     'OUTPUT: {{"explanation": "...", "question": "..."}}'
 )
+
+
+# ---------------------------------------------------------------------------
+# JSON parsing helpers
+# ---------------------------------------------------------------------------
+
+def _sanitize_json(text: str) -> str:
+    """Fix invalid escape sequences and literal control characters inside JSON strings."""
+    result = []
+    in_string = False
+    escaped = False
+    _valid_escapes = set('"\\\/bfnrtu')
+    for ch in text:
+        if escaped:
+            escaped = False
+            if ch not in _valid_escapes:
+                result[-1] = "\\\\"
+            result.append(ch)
+        elif ch == "\\" and in_string:
+            escaped = True
+            result.append(ch)
+        elif ch == '"':
+            in_string = not in_string
+            result.append(ch)
+        elif in_string and ch == "\n":
+            result.append("\\n")
+        elif in_string and ch == "\r":
+            result.append("\\r")
+        elif in_string and ch == "\t":
+            result.append("\\t")
+        elif in_string and ord(ch) < 0x20:
+            result.append(f"\\u{ord(ch):04x}")
+        else:
+            result.append(ch)
+    return "".join(result)
 
 
 # ---------------------------------------------------------------------------
@@ -155,7 +191,11 @@ def reward_fn(completions: List[Any], prompts: List[Any], **kwargs) -> List[floa
 
         try:
             m = re.search(r"\{.*\}", text, re.DOTALL)
-            parsed = json.loads(m.group()) if m else json.loads(text)
+            raw = m.group() if m else text
+            try:
+                parsed = json.loads(raw)
+            except json.JSONDecodeError:
+                parsed = json.loads(_sanitize_json(raw))
             explanation = str(parsed.get("explanation", "")).strip()
             question    = str(parsed.get("question", "")).strip()
             if not explanation or not question:
@@ -230,9 +270,12 @@ def main(args: argparse.Namespace) -> None:
             logging_steps=5,
             save_strategy="epoch",
             num_generations=4,
-            max_new_tokens=600,
-            temperature=0.8,
             report_to="none",
+            generation_config=GenerationConfig(
+                max_new_tokens=600,
+                temperature=0.8,
+                do_sample=True,
+            ),
         ),
         train_dataset=dataset,
     )
