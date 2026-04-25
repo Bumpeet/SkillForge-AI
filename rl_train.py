@@ -70,11 +70,11 @@ SYSTEM_PROMPT = (
     "1. Teaching material that will help the student improve.\n"
     "2. One follow-up question that directly tests the material you generated.\n\n"
     "OUTPUT RULES (critical — reward parsing depends on this):\n"
-    "- Return exactly one JSON object and nothing else. The first non-whitespace character MUST be '{' and the last non-whitespace character MUST be '}'.\n"
+    "- Return exactly one JSON object and nothing else. The first non-whitespace character MUST be '{{' and the last non-whitespace character MUST be '}}'.\n"
     "- No markdown, no code fences (no ```), no labels such as OUTPUT:, Example:, EXPLANATION:, or NOTE: outside the JSON.\n"
     "- The object MUST have exactly two keys, both non-empty strings: \"explanation\" (teaching material) and \"question\" (one follow-up). No other top-level keys.\n"
     "- Do not use placeholders: never output the literal ellipsis \"...\" or empty strings for either field. Do not echo template text or \"fill in the blank\" examples.\n"
-    "- Do not output a second JSON object, JavaScript/Python/C++ samples, or extra '{' / '}' blocks outside that single object. Put any code or examples inside the two string values only, with valid JSON escaping.\n"
+    "- Do not output a second JSON object, JavaScript/Python/C++ samples, or extra '{{' / '}}' blocks outside that single object. Put any code or examples inside the two string values only, with valid JSON escaping.\n"
     "- Inside strings, escape newlines as \\n and internal double quotes as \\\". Do not paste raw multi-line JSON or unescaped control characters inside a string.\n"
     "- Use double quotes for all keys and string values.\n"
 )
@@ -89,7 +89,7 @@ def _sanitize_json(text: str) -> str:
     result = []
     in_string = False
     escaped = False
-    _valid_escapes = set('"\\\/bfnrtu')
+    _valid_escapes = set(r'"\/bfnrtu')
     for ch in text:
         if escaped:
             escaped = False
