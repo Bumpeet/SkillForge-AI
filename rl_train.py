@@ -168,6 +168,49 @@ def _fenced_json_blobs(text: str) -> List[str]:
     return out
 
 
+def _angle_json_blobs(text: str) -> List[str]:
+    out = []
+    for m in re.finditer(r"<json>\s*([\s\S]*?)</json>", text, re.IGNORECASE):
+        chunk = m.group(1).strip()
+        if chunk:
+            out.append(chunk)
+    # Unclosed <json>… (common in truncated generations)
+    for m in re.finditer(r"<json>\s*", text, re.IGNORECASE):
+        tail = text[m.end() :].strip()
+        if tail:
+            out.append(tail)
+    return out
+
+
+def _find_object_open_brace_before(s: str, pos: int) -> Optional[int]:
+    """Walk backward from pos (before a JSON key) to the '{' that opens that object. String/escape aware."""
+    depth = 0
+    i = pos - 1
+    in_str = False
+    escaped = False
+    while i >= 0:
+        ch = s[i]
+        if in_str:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_str = False
+            i -= 1
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "}":
+            depth += 1
+        elif ch == "{":
+            if depth == 0:
+                return i
+            depth -= 1
+        i -= 1
+    return None
+
+
 def _collect_reward_dict_candidates(text: str) -> List[dict]:
     seen: set[tuple] = set()
     found: List[dict] = []
@@ -181,6 +224,7 @@ def _collect_reward_dict_candidates(text: str) -> List[dict]:
 
     blobs: List[str] = []
     blobs.extend(_fenced_json_blobs(text))
+    blobs.extend(_angle_json_blobs(text))
     blobs.append(text)
 
     for blob in blobs:
@@ -189,6 +233,22 @@ def _collect_reward_dict_candidates(text: str) -> List[dict]:
             d = _try_raw_decode_reward_dict(stripped)
             if d:
                 add(d)
+        # Prefer objects that visibly start with our schema keys (skips JS `{ if (` noise).
+        for m in re.finditer(r"\{\s*\"explanation\"\s*:", blob):
+            d = _try_raw_decode_reward_dict(blob[m.start() :].lstrip())
+            if d:
+                add(d)
+        for m in re.finditer(r"\{\s*\"question\"\s*:", blob):
+            d = _try_raw_decode_reward_dict(blob[m.start() :].lstrip())
+            if d:
+                add(d)
+        # Anchor on "explanation" key when object does not start with `{` visible match.
+        for m in re.finditer(r'"explanation"\s*:', blob):
+            start = _find_object_open_brace_before(blob, m.start())
+            if start is not None:
+                d = _try_raw_decode_reward_dict(blob[start:].lstrip())
+                if d:
+                    add(d)
         for idx, ch in enumerate(blob):
             if ch != "{":
                 continue
@@ -202,18 +262,28 @@ _REWARD_KV_PATTERN = re.compile(
     r'"explanation"\s*:\s*"((?:[^"\\]|\\.)*)"\s*,\s*"question"\s*:\s*"((?:[^"\\]|\\.)*)"',
     re.DOTALL,
 )
+_REWARD_KV_PATTERN_Q_FIRST = re.compile(
+    r'"question"\s*:\s*"((?:[^"\\]|\\.)*)"\s*,\s*"explanation"\s*:\s*"((?:[^"\\]|\\.)*)"',
+    re.DOTALL,
+)
 
 
 def _regex_extract_reward_kv(text: str) -> Optional[dict]:
-    m = _REWARD_KV_PATTERN.search(text)
-    if not m:
-        return None
-    try:
-        exp = json.loads('"' + m.group(1) + '"')
-        q = json.loads('"' + m.group(2) + '"')
-    except json.JSONDecodeError:
-        return None
-    return {"explanation": str(exp), "question": str(q)}
+    for pat in (_REWARD_KV_PATTERN, _REWARD_KV_PATTERN_Q_FIRST):
+        m = pat.search(text)
+        if not m:
+            continue
+        try:
+            if pat is _REWARD_KV_PATTERN:
+                exp = json.loads('"' + m.group(1) + '"')
+                q = json.loads('"' + m.group(2) + '"')
+            else:
+                q = json.loads('"' + m.group(1) + '"')
+                exp = json.loads('"' + m.group(2) + '"')
+        except json.JSONDecodeError:
+            continue
+        return {"explanation": str(exp), "question": str(q)}
+    return None
 
 
 def _extract_reward_json_impl(text: str) -> tuple[dict, dict]:
