@@ -31,7 +31,6 @@ from huggingface_hub import HfApi
 from unsloth import FastLanguageModel
 from unsloth.chat_templates import get_chat_template
 from trl import GRPOTrainer, GRPOConfig
-from transformers import GenerationConfig
 
 # ---------------------------------------------------------------------------
 # Local imports — add repo root and server/ to sys.path for direct execution
@@ -255,6 +254,11 @@ def main(args: argparse.Namespace) -> None:
     dataset = make_prompt_dataset(args.flows)
     print(f"Dataset size: {len(dataset)} prompts loaded from {args.flows}")
 
+    # Set generation parameters on the model — works across all TRL versions.
+    model.generation_config.max_new_tokens = 600
+    model.generation_config.temperature = 0.8
+    model.generation_config.do_sample = True
+
     trainer = GRPOTrainer(
         model=model,
         tokenizer=tokenizer,
@@ -271,11 +275,6 @@ def main(args: argparse.Namespace) -> None:
             save_strategy="epoch",
             num_generations=4,
             report_to="none",
-            generation_config=GenerationConfig(
-                max_new_tokens=600,
-                temperature=0.8,
-                do_sample=True,
-            ),
         ),
         train_dataset=dataset,
     )
