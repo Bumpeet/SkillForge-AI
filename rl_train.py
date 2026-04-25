@@ -90,7 +90,7 @@ def make_prompt_dataset(flows_path: str = EPISODE_FLOWS_PATH) -> Dataset:
         concept    = flow["concept"]
         mastery    = float(flow["mastery"])
         raw_diff   = flow["target_difficulty"]
-        difficulty = _DIFFICULTY_NAME_TO_INT.get(str(raw_diff).lower(), int(raw_diff))
+        difficulty = _DIFFICULTY_NAME_TO_INT.get(str(raw_diff).lower()) or (int(raw_diff) if str(raw_diff).isdigit() else 1)
         label      = DIFFICULTY_LABELS[difficulty]
         past_wrong = flow.get("past_wrong_questions") or []
 
