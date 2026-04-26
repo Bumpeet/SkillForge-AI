@@ -21,6 +21,32 @@ Stdout format (mandatory per hackathon spec):
 Example usage:
     HF_TOKEN=hf_xxx OPENAI_API_KEY=sk-xxx python inference.py
     LOCAL_IMAGE_NAME=adaptive-tutor:latest HF_TOKEN=hf_xxx python inference.py
+
+Using your own model on the Hugging Face Hub with inference.py
+--------------------------------------------------------------
+The default OpenAI-compatible URL (router.huggingface.co) only exposes *chat* models.
+If you see: "is not a chat model", use one of these:
+
+1) Serverless Hub text generation (no dedicated endpoint)
+   pip install huggingface_hub
+   set MODEL_NAME=Bumpeet/qwen2.5-1.5b-adaptive-tutor-rl
+   set TEACHING_BACKEND=hf_textgen
+   set HF_TOKEN=hf_xxx
+   set OPENAI_API_KEY=sk-xxx
+   python inference.py
+
+   Requires a loadable causal LM on the Hub (merged weights or full model), not adapter-only.
+
+2) Dedicated Inference Endpoint (TGI / vLLM with OpenAI API)
+   Deploy your repo on HF Inference Endpoints, then:
+   set API_BASE_URL=https://<your-endpoint>.endpoints.huggingface.cloud/v1
+   set MODEL_NAME=...   (often the served name shown in the endpoint UI)
+   set HF_TOKEN=hf_xxx
+   set TEACHING_BACKEND=openai
+   python inference.py
+
+3) Local OpenAI-compatible server (vLLM, llama.cpp server, etc.)
+   Point API_BASE_URL to http://localhost:8000/v1 (or your port) and TEACHING_BACKEND=openai.
 """
 
 import asyncio
@@ -45,6 +71,8 @@ SUCCESS_THRESHOLD: float = 0.3  # reward >= threshold → success
 _EPS: float = 1e-6  # tiny positive floor used only for unexpected exceptions
 TEMPERATURE: float = 0.2
 MAX_TOKENS_TEACHING_OUTPUT: int = 1800
+# openai: OpenAI-compatible chat (default). hf_textgen: Hugging Face Inference API text_generation + Qwen chat template.
+TEACHING_BACKEND: str = os.getenv("TEACHING_BACKEND", "openai").strip().lower()
 
 TEACHING_SYSTEM_PROMPT: str = textwrap.dedent("""
     You are an expert DSA tutor and problem setter.
@@ -181,6 +209,52 @@ def _parse_llm_json(text: str) -> dict:
         return json.loads(_sanitize_json_string(text))
 
 
+# Qwen2 special tokens (concatenate so editors don't mangle "im_end")
+_IM_START = "<|im_start|>"
+_IM_END = "<|" + "im_end" + "|>"
+
+
+def _qwen25_chat_user_prompt(user_content: str) -> str:
+    """Wrap user content in Qwen2.5 ChatML so text_generation completes the assistant turn."""
+    return (
+        f"{_IM_START}system\n"
+        "You are Qwen, created by Alibaba Cloud. You are a helpful assistant."
+        f"{_IM_END}\n"
+        f"{_IM_START}user\n{user_content}{_IM_END}\n"
+        f"{_IM_START}assistant\n"
+    )
+
+
+def _generate_teaching_raw_openai(client: Any, prompt: str) -> str:
+    completion = client.chat.completions.create(
+        model=MODEL_NAME,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=TEMPERATURE,
+        max_tokens=MAX_TOKENS_TEACHING_OUTPUT,
+    )
+    return (completion.choices[0].message.content or "").strip()
+
+
+def _generate_teaching_raw_hf_textgen(prompt: str) -> str:
+    from huggingface_hub import InferenceClient
+
+    if not API_KEY:
+        raise ValueError("HF_TOKEN (or API_KEY) is required for TEACHING_BACKEND=hf_textgen")
+    ic = InferenceClient(model=MODEL_NAME, token=API_KEY)
+    full_prompt = _qwen25_chat_user_prompt(prompt)
+    out = ic.text_generation(
+        full_prompt,
+        max_new_tokens=MAX_TOKENS_TEACHING_OUTPUT,
+        temperature=TEMPERATURE,
+        return_full_text=False,
+    )
+    if isinstance(out, str):
+        return out.strip()
+    if hasattr(out, "generated_text"):
+        return str(getattr(out, "generated_text", "")).strip()
+    return str(out).strip()
+
+
 def get_teaching_output(
     client: Any,
     concept: str,
@@ -206,16 +280,17 @@ def get_teaching_output(
             difficulty=difficulty_label,
         )
         print(
-            f"[DEBUG] Calling Qwen for teaching output: concept={concept} mastery={mastery:.2f} difficulty={difficulty_label}",
+            f"[DEBUG] Calling Qwen for teaching output: concept={concept} mastery={mastery:.2f} difficulty={difficulty_label} backend={TEACHING_BACKEND}",
             flush=True,
         )
-        completion = client.chat.completions.create(
-            model=MODEL_NAME,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=TEMPERATURE,
-            max_tokens=MAX_TOKENS_TEACHING_OUTPUT,
-        )
-        raw = (completion.choices[0].message.content or "").strip()
+        if TEACHING_BACKEND in ("hf_textgen", "hf", "huggingface"):
+            raw = _generate_teaching_raw_hf_textgen(prompt)
+        elif TEACHING_BACKEND in ("openai", ""):
+            raw = _generate_teaching_raw_openai(client, prompt)
+        else:
+            raise ValueError(
+                f"Unknown TEACHING_BACKEND={TEACHING_BACKEND!r}; use 'openai' or 'hf_textgen'"
+            )
         print(f"[DEBUG] Teaching raw response (first 120 chars): {raw[:120]!r}", flush=True)
         parsed = _parse_llm_json(raw)
         explanation = str(parsed.get("explanation", "")).strip()

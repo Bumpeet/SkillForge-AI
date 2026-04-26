@@ -38,8 +38,8 @@ from models import (
     TASKS,
     TutorState,
 )
-from rewards import _EPS, compute_reward
-from student_model import (
+from .rewards import _EPS, compute_reward
+from .student_model import (
     DEFAULT_MASTERY,
     mastery_to_difficulty,
     simulate_student,
