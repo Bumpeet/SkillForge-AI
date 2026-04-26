@@ -1,3 +1,19 @@
+---
+title: Adaptive Tutor Environment Server
+emoji: 🧑‍🏫
+colorFrom: green
+colorTo: blue
+sdk: docker
+pinned: false
+app_port: 8000
+base_path: /web
+tags:
+  - openenv
+  - education
+  - rl
+  - dsa
+---
+
 # SkillForge AI: Adaptive Tutor Environment
 
 **Hackathon:** Meta x Hugging Face OpenEnv Challenge
